@@ -4,11 +4,23 @@ namespace KKR.MailLens;
 
 sealed record DetectedFile(string Filename, string MimeType, string Extension, byte[] Content);
 
+sealed record ExtractedSegment(
+    int Ordinal,
+    string RawText,
+    string CleanText,
+    int? PageNumber = null,
+    int? SlideNumber = null,
+    string? SheetName = null,
+    string? Heading = null,
+    double? Confidence = null,
+    string? MetadataJson = null);
+
 sealed record ExtractionResult(
     string DetectedMimeType,
     string RawText,
     string CleanText,
-    bool WasTruncated);
+    bool WasTruncated,
+    IReadOnlyList<ExtractedSegment> Segments);
 
 sealed record TextExtractionOptions(int MaxBytes = 25 * 1024 * 1024, int MaxCharacters = 2_000_000)
 {
@@ -34,7 +46,11 @@ sealed class ContentExtractionDispatcher
         IEnumerable<IContentExtractor>? extractors = null,
         TextExtractionOptions? options = null)
     {
-        this.extractors = (extractors ?? [new PlainTextExtractor(), new HtmlContentExtractor()]).ToArray();
+        this.extractors = (extractors ??
+        [
+            new PlainTextExtractor(), new HtmlContentExtractor(), new PdfTextExtractor(),
+            new WordExtractor(), new ExcelExtractor(), new PowerPointExtractor(),
+        ]).ToArray();
         this.options = options ?? new TextExtractionOptions();
         this.options.Validate();
     }

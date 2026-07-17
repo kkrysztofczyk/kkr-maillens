@@ -9,7 +9,9 @@ sealed class PlainTextExtractor : IContentExtractor
     public ExtractionResult Extract(DetectedFile file, TextExtractionOptions options)
     {
         DecodedText decoded = TextDecoder.Decode(file.Content, options);
-        return new ExtractionResult("text/plain", decoded.Text, TextNormalizer.Normalize(decoded.Text), decoded.WasTruncated);
+        string clean = TextNormalizer.Normalize(decoded.Text);
+        return new ExtractionResult(file.MimeType, decoded.Text, clean, decoded.WasTruncated,
+            [new ExtractedSegment(0, decoded.Text, clean)]);
     }
 }
 
@@ -27,7 +29,9 @@ sealed class HtmlContentExtractor : IContentExtractor
             text = text[..options.MaxCharacters];
             truncated = true;
         }
-        return new ExtractionResult("text/html", decoded.Text, TextNormalizer.Normalize(text), truncated);
+        string clean = TextNormalizer.Normalize(text);
+        return new ExtractionResult("text/html", decoded.Text, clean, truncated,
+            [new ExtractedSegment(0, decoded.Text, clean)]);
     }
 }
 
