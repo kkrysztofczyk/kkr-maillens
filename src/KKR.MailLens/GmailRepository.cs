@@ -152,15 +152,22 @@ static class GmailRepository
                         ("$message", messageId), ("$label", localLabelId));
                 }
 
-                Exec(c, tx, "DELETE FROM attachments WHERE message_id=$message;", ("$message", messageId));
+                Exec(c, tx, "UPDATE attachments SET is_deleted=1 WHERE message_id=$message;", ("$message", messageId));
                 foreach (var attachment in message.Attachments)
                 {
                     using var insertAttachment = Command(c, tx, """
-                        INSERT INTO attachments(message_id,gmail_attachment_id,filename,mime_type,size_bytes,
-                            download_status,index_status)
-                        VALUES($message,$gmail,$filename,$mime,$size,'metadata-only','not-indexed');
-                        """, ("$message", messageId), ("$gmail", attachment.GmailAttachmentId),
+                        INSERT INTO attachments(message_id,gmail_attachment_id,part_id,filename,mime_type,size_bytes,
+                            download_status,index_status,is_deleted,last_seen_generation)
+                        VALUES($message,$gmail,$part,$filename,$mime,$size,'metadata-only','not-indexed',0,$generation)
+                        ON CONFLICT(message_id,gmail_attachment_id,part_id) DO UPDATE SET
+                            filename=excluded.filename,
+                            mime_type=excluded.mime_type,
+                            size_bytes=excluded.size_bytes,
+                            is_deleted=0,
+                            last_seen_generation=excluded.last_seen_generation;
+                        """, ("$message", messageId), ("$gmail", attachment.GmailAttachmentId), ("$part", attachment.PartId),
                         ("$filename", attachment.Filename), ("$mime", attachment.MimeType), ("$size", attachment.SizeBytes));
+                    insertAttachment.Parameters.AddWithValue("$generation", generation);
                     insertAttachment.ExecuteNonQuery();
                 }
 

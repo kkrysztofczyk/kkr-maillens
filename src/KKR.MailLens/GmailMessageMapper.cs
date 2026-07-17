@@ -109,6 +109,7 @@ static partial class GmailMessageMapper
         if (namedAttachment || binaryAttachment)
         {
             attachments.Add(new GmailAttachmentRecord(
+                part.PartId ?? "",
                 part.AttachmentId ?? "",
                 DecodeHeader(part.Filename ?? ""),
                 mime,

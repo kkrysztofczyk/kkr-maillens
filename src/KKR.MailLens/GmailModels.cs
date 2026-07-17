@@ -38,6 +38,7 @@ sealed class GmailApiMessage
 }
 
 sealed record GmailAttachmentRecord(
+    string PartId,
     string GmailAttachmentId,
     string Filename,
     string MimeType,

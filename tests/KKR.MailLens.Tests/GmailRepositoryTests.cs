@@ -69,6 +69,64 @@ public sealed class GmailRepositoryTests
     }
 
     [TestMethod]
+    public void Attachment_ReimportPreservesProcessingState_AndMarksMissing()
+    {
+        using var db = new TestDatabase();
+        GmailAccountRecord account = db.AddAccount();
+        var originalPart = new GmailApiPart
+        {
+            PartId = "2",
+            MimeType = "application/pdf",
+            Filename = "record.pdf",
+            AttachmentId = "attachment-1",
+            Size = 321,
+        };
+        GmailStoredMessage original = GmailMessageMapper.Map(
+            GmailTestMessage.Create("m1", extraParts: [originalPart]), account.Id);
+        GmailRepository.SaveMessages(db.Connection, 1, [original]);
+
+        using (var processed = db.Connection.CreateCommand())
+        {
+            processed.CommandText = """
+                UPDATE attachments
+                SET download_status='downloaded', local_path='encrypted/blob-1',
+                    extracted_text='Neutralny tekst', index_status='indexed', error_message='retained';
+                """;
+            processed.ExecuteNonQuery();
+        }
+
+        var updatedPart = new GmailApiPart
+        {
+            PartId = "2",
+            MimeType = "application/pdf",
+            Filename = "updated-record.pdf",
+            AttachmentId = "attachment-1",
+            Size = 654,
+        };
+        GmailStoredMessage updated = GmailMessageMapper.Map(
+            GmailTestMessage.Create("m1", extraParts: [updatedPart]), account.Id);
+        GmailRepository.SaveMessages(db.Connection, 2, [updated]);
+
+        Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM attachments;"));
+        Assert.AreEqual("updated-record.pdf", db.ScalarText("SELECT filename FROM attachments;"));
+        Assert.AreEqual(654, db.ScalarLong("SELECT size_bytes FROM attachments;"));
+        Assert.AreEqual("downloaded", db.ScalarText("SELECT download_status FROM attachments;"));
+        Assert.AreEqual("encrypted/blob-1", db.ScalarText("SELECT local_path FROM attachments;"));
+        Assert.AreEqual("Neutralny tekst", db.ScalarText("SELECT extracted_text FROM attachments;"));
+        Assert.AreEqual("indexed", db.ScalarText("SELECT index_status FROM attachments;"));
+        Assert.AreEqual("retained", db.ScalarText("SELECT error_message FROM attachments;"));
+        Assert.AreEqual(0, db.ScalarLong("SELECT is_deleted FROM attachments;"));
+        Assert.AreEqual(2, db.ScalarLong("SELECT last_seen_generation FROM attachments;"));
+
+        GmailStoredMessage withoutAttachment = GmailMessageMapper.Map(GmailTestMessage.Create("m1"), account.Id);
+        GmailRepository.SaveMessages(db.Connection, 3, [withoutAttachment]);
+
+        Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM attachments;"));
+        Assert.AreEqual(1, db.ScalarLong("SELECT is_deleted FROM attachments;"));
+        Assert.AreEqual("Neutralny tekst", db.ScalarText("SELECT extracted_text FROM attachments;"));
+    }
+
+    [TestMethod]
     public void DeleteMessage_RemovesNormalizedRowAndFtsEntry()
     {
         using var db = new TestDatabase();

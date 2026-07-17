@@ -36,7 +36,7 @@ static class Db
         finally { SqliteConnection.ClearAllPools(); }
     }
 
-    public const int SchemaVersion = 2;
+    public const int SchemaVersion = 3;
 
     /// <summary>Tworzy tabele + FTS5 jesli brak (idempotentne). mails_fts trzyma kopie pol do FTS
     /// (nie external-content: upserty z zachowaniem rowid sa prostsze i odporne).</summary>
@@ -126,7 +126,8 @@ static class Db
             CREATE TABLE IF NOT EXISTS attachments(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-                gmail_attachment_id TEXT,
+                gmail_attachment_id TEXT NOT NULL DEFAULT '',
+                part_id TEXT NOT NULL DEFAULT '',
                 filename TEXT NOT NULL DEFAULT '',
                 mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
                 size_bytes INTEGER NOT NULL DEFAULT 0,
@@ -134,7 +135,9 @@ static class Db
                 local_path TEXT,
                 extracted_text TEXT,
                 index_status TEXT NOT NULL DEFAULT 'not-indexed',
-                error_message TEXT
+                error_message TEXT,
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                last_seen_generation INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS ix_attachments_message ON attachments(message_id);
 
@@ -150,6 +153,11 @@ static class Db
             """);
         // migracja starszych baz (bez kolumny kind = mail|alert)
         EnsureColumn(c, "mails", "kind", "TEXT");
+        EnsureColumn(c, "attachments", "part_id", "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn(c, "attachments", "is_deleted", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(c, "attachments", "last_seen_generation", "INTEGER NOT NULL DEFAULT 0");
+        Exec(c, "UPDATE attachments SET gmail_attachment_id='' WHERE gmail_attachment_id IS NULL;");
+        Exec(c, "CREATE UNIQUE INDEX IF NOT EXISTS ux_attachments_message_key ON attachments(message_id,gmail_attachment_id,part_id);");
         // Indeksy tylko tam gdzie realnie uzywane (koszt przy zapisie/harveście). conversation_id -
         // brak zapytan; kind - 2 wartosci, planer i tak pomija. Usuwamy jesli zostaly ze starszej bazy.
         Exec(c, "DROP INDEX IF EXISTS ix_mails_conv; DROP INDEX IF EXISTS ix_mails_kind;");
