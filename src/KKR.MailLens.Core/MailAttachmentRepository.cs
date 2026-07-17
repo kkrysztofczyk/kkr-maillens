@@ -6,7 +6,7 @@ static class MailAttachmentRepository
 {
     internal sealed record Item(long Id, string MailEntryId, string Provider, string ProviderMessageKey,
         string ProviderAttachmentKey, string PartId, string Filename, string MimeType, long SizeBytes,
-        string ContentId, bool IsInline, string? InlineBase64Data);
+        string ContentId, bool IsInline, long? BlobId, string? InlineBase64Data);
 
     public static void UpsertGmail(SqliteConnection connection, long generation,
         IReadOnlyList<GmailStoredMessage> messages)
@@ -75,7 +75,7 @@ static class MailAttachmentRepository
         using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT id,mail_entry_id,provider,provider_message_key,provider_attachment_key,part_id,
-                filename,mime_type,size_bytes,content_id,is_inline,inline_base64_data
+                filename,mime_type,size_bytes,content_id,is_inline,blob_id,inline_base64_data
             FROM mail_attachments WHERE id=$id AND is_deleted=0;
             """;
         command.Parameters.AddWithValue("$id", id);
@@ -83,7 +83,8 @@ static class MailAttachmentRepository
         if (!reader.Read()) throw new InvalidOperationException("Załącznik nie istnieje.");
         return new Item(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
             reader.GetString(4), reader.GetString(5), reader.GetString(6), reader.GetString(7), reader.GetInt64(8),
-            reader.GetString(9), reader.GetInt64(10) != 0, reader.IsDBNull(11) ? null : reader.GetString(11));
+            reader.GetString(9), reader.GetInt64(10) != 0, reader.IsDBNull(11) ? null : reader.GetInt64(11),
+            reader.IsDBNull(12) ? null : reader.GetString(12));
     }
 
     public static void MarkDownloaded(SqliteConnection connection, long id, StoredBlob blob, string detectedMimeType)

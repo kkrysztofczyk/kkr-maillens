@@ -79,6 +79,20 @@ sealed class EncryptedBlobStore
         finally { CryptographicOperations.ZeroMemory(encrypted); }
     }
 
+    public static StoredBlob Get(SqliteConnection connection, long id)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id,sha256,encrypted_path,original_size,encryption_version
+            FROM stored_blobs WHERE id=$id;
+            """;
+        command.Parameters.AddWithValue("$id", id);
+        using var reader = command.ExecuteReader();
+        if (!reader.Read()) throw new InvalidOperationException("Blob nie istnieje.");
+        return new StoredBlob(reader.GetInt64(0), reader.GetString(1), reader.GetString(2),
+            reader.GetInt64(3), reader.GetInt32(4));
+    }
+
     static StoredBlob? Find(SqliteConnection connection, string hash)
     {
         using var command = connection.CreateCommand();
