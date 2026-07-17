@@ -78,3 +78,5 @@ Desktop.ini
 
 # Local Codex workspace metadata
 .agents/
+.claude/
+.codex/
