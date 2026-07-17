@@ -29,7 +29,7 @@
 
   <section>
     <h2>Opis</h2>
-    <p>Aplikacja importuje pocztę ze źródła desktopowego obsługiwanego przez COM lub z serwera IMAP. Wiadomości trafiają do lokalnej, zaszyfrowanej bazy SQLite. Klucz aktywnej sesji istnieje wyłącznie w RAM procesu GUI.</p>
+    <p>Aplikacja importuje pocztę ze źródła desktopowego obsługiwanego przez COM, z serwera IMAP albo przez Gmail API. Wiadomości trafiają do lokalnej, zaszyfrowanej bazy SQLite. Klucz aktywnej sesji istnieje wyłącznie w RAM procesu GUI.</p>
   </section>
 
   <section>
@@ -62,14 +62,26 @@ run\KKR.MailLens.exe imap-harvest --account sender@example.invalid --since 2026-
   </section>
 
   <section>
+    <h2>Gmail API</h2>
+    <p>Połączenie korzysta z OAuth 2.0 dla aplikacji desktopowej i zakresu tylko do odczytu. Hasło do Gmaila nie trafia do aplikacji, a refresh token jest przechowywany lokalnie przez Windows DPAPI.</p>
+    <pre>run\KKR.MailLens.exe account add gmail
+run\KKR.MailLens.exe gmail sync
+run\KKR.MailLens.exe gmail status</pre>
+    <p>Konfigurację klienta OAuth należy przechowywać poza repozytorium w <code>%LOCALAPPDATA%\kkr-maillens\gmail-oauth-client.json</code> albo wskazać zmienną <code>KKR_MAILLENS_GMAIL_OAUTH_CONFIG</code>. Pełny import można wznowić, a kolejne synchronizacje używają historii zmian.</p>
+  </section>
+
+  <section>
     <h2>Dane i bezpieczeństwo</h2>
-    <p>Domyślny katalog to <code>%LOCALAPPDATA%\kkr-maillens</code>; zmienna <code>KKR_MAILLENS_DIR</code> pozwala wskazać inną lokalizację. SQLCipher, schemat SQLite, indeks FTS5 i idempotentny upsert pozostają częścią dotychczasowego przepływu.</p>
+    <p>Domyślny katalog to <code>%LOCALAPPDATA%\kkr-maillens</code>; zmienna <code>KKR_MAILLENS_DIR</code> pozwala wskazać inną lokalizację. SQLCipher, indeks FTS5 i idempotentny upsert pozostają częścią przepływu. Tokeny OAuth nie są zapisywane w logach ani w jawnej postaci.</p>
   </section>
 
   <section>
     <h2>Build</h2>
     <pre>dotnet build KKR.MailLens.sln
-dotnet run --project src\KKR.MailLens\KKR.MailLens.csproj -- selftest</pre>
+dotnet test KKR.MailLens.sln
+dotnet run --project src\KKR.MailLens\KKR.MailLens.csproj -- selftest
+dotnet publish src\KKR.MailLens\KKR.MailLens.csproj -c Release -o run -p:DebugType=None -p:DebugSymbols=false
+dotnet publish src\KKR.MailLens.Gui\KKR.MailLens.Gui.csproj -c Release -o run -p:DebugType=None -p:DebugSymbols=false</pre>
   </section>
 </main>
 </body>

@@ -19,6 +19,18 @@ run\KKR.MailLens.exe imap-add --host imap.example.invalid --user sender@example.
 run\KKR.MailLens.exe imap-harvest --account sender@example.invalid --since 2026-01-01
 ```
 
+## Gmail przez OAuth
+
+Włącz Gmail API i utwórz klienta OAuth typu Desktop app. Plik konfiguracji zapisz poza repozytorium jako `%LOCALAPPDATA%\kkr-maillens\gmail-oauth-client.json` albo wskaż zmienną `KKR_MAILLENS_GMAIL_OAUTH_CONFIG`. Po odblokowaniu GUI:
+
+```powershell
+run\KKR.MailLens.exe account add gmail
+run\KKR.MailLens.exe gmail sync
+run\KKR.MailLens.exe gmail status
+```
+
+Logowanie otwiera się w systemowej przeglądarce. Aplikacja nie pobiera hasła; refresh token jest chroniony przez Windows DPAPI. `gmail sync --full` wymusza pełną synchronizację, a `gmail cancel` zatrzymuje trwającą operację.
+
 ## Wyszukiwanie z CLI
 
 ```powershell
@@ -37,5 +49,8 @@ Dane są przechowywane w `%LOCALAPPDATA%\kkr-maillens`. Alternatywny katalog mo�
 
 ```powershell
 dotnet build KKR.MailLens.sln
+dotnet test KKR.MailLens.sln
 dotnet run --project src\KKR.MailLens\KKR.MailLens.csproj -- selftest
+dotnet publish src\KKR.MailLens\KKR.MailLens.csproj -c Release -o run -p:DebugType=None -p:DebugSymbols=false
+dotnet publish src\KKR.MailLens.Gui\KKR.MailLens.Gui.csproj -c Release -o run -p:DebugType=None -p:DebugSymbols=false
 ```

@@ -22,6 +22,8 @@ return cmd switch
     "imap-add" => Cli.ImapAdd(args),
     "imap-list" => Cli.ImapList(),
     "imap-harvest" => Cli.ImapHarvest(args),
+    "account" => Cli.Account(args),
+    "gmail" => Cli.Gmail(args),
     "yubi-test" => Cli.YubiTest(),
     _ => Cli.Help(),
 };

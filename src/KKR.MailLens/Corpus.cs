@@ -119,6 +119,50 @@ static class Corpus
         return Convert.ToInt64(cmd.ExecuteScalar());
     }
 
+    public static int DeleteByEntryIds(SqliteConnection c, IEnumerable<string> entryIds)
+    {
+        int deleted = 0;
+        using var tx = c.BeginTransaction();
+        using var find = c.CreateCommand();
+        find.Transaction = tx;
+        find.CommandText = "SELECT rowid FROM mails WHERE entry_id=$id;";
+        var findId = find.CreateParameter(); findId.ParameterName = "$id"; find.Parameters.Add(findId);
+
+        using var delFts = c.CreateCommand();
+        delFts.Transaction = tx;
+        delFts.CommandText = "DELETE FROM mails_fts WHERE rowid=$rid;";
+        var rid = delFts.CreateParameter(); rid.ParameterName = "$rid"; delFts.Parameters.Add(rid);
+
+        using var delMail = c.CreateCommand();
+        delMail.Transaction = tx;
+        delMail.CommandText = "DELETE FROM mails WHERE entry_id=$id;";
+        var delId = delMail.CreateParameter(); delId.ParameterName = "$id"; delMail.Parameters.Add(delId);
+
+        foreach (string id in entryIds.Distinct(StringComparer.Ordinal))
+        {
+            findId.Value = id;
+            object? rowId = find.ExecuteScalar();
+            if (rowId is null or DBNull) continue;
+            rid.Value = rowId; delFts.ExecuteNonQuery();
+            delId.Value = id; deleted += delMail.ExecuteNonQuery();
+        }
+        tx.Commit();
+        return deleted;
+    }
+
+    public static int DeleteByStoreId(SqliteConnection c, string storeId)
+    {
+        var ids = new List<string>();
+        using (var select = c.CreateCommand())
+        {
+            select.CommandText = "SELECT entry_id FROM mails WHERE store_id=$store;";
+            select.Parameters.AddWithValue("$store", storeId);
+            using var reader = select.ExecuteReader();
+            while (reader.Read()) ids.Add(reader.GetString(0));
+        }
+        return DeleteByEntryIds(c, ids);
+    }
+
     /// <summary>Czas ostatniego harvestu (meta 'last_harvest', "yyyy-MM-dd HH:mm:ss") albo null.</summary>
     public static string? LastHarvest(SqliteConnection c)
     {

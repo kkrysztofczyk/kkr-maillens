@@ -157,14 +157,13 @@ static class Cli
     {
         var accts = ImapAccounts.Load();
         var a = new ImapAccount();
-        if (Flag(args, "--gmail")) { a.Host = "imap.gmail.com"; a.Port = 993; a.UseSsl = true; }
         a.Host = GetStr(args, "--host") ?? a.Host;
         a.Port = GetInt(args, "--port", a.Port == 0 ? 993 : a.Port);
         a.User = GetStr(args, "--user") ?? "";
         if (Flag(args, "--starttls")) a.UseSsl = false;
         a.Name = GetStr(args, "--name") ?? a.User;
         if (string.IsNullOrEmpty(a.Host) || string.IsNullOrEmpty(a.User))
-        { Console.Error.WriteLine("Podaj --host i --user (albo --gmail --user ...)."); return 1; }
+        { Console.Error.WriteLine("Podaj --host i --user."); return 1; }
 
         // Haslo tylko z --pass albo interaktywnie (nie z env - patrz uwaga o PIN wyzej).
         string? pass = GetStr(args, "--pass");
@@ -223,6 +222,186 @@ static class Cli
         return 0;
     }
 
+    // ---- Gmail API (OAuth 2.0, bez hasla do skrzynki) ----
+
+    public static int Account(string[] args)
+    {
+        string sub = args.Length > 1 ? args[1].ToLowerInvariant() : "list";
+        return sub switch
+        {
+            "add" when args.Length > 2 && args[2].Equals("gmail", StringComparison.OrdinalIgnoreCase) => AccountAddGmail(),
+            "list" => AccountList(),
+            "remove" when args.Length > 2 => AccountRemove(args[2]),
+            _ => AccountHelp(),
+        };
+    }
+
+    public static int Gmail(string[] args)
+    {
+        string sub = args.Length > 1 ? args[1].ToLowerInvariant() : "status";
+        return sub switch
+        {
+            "sync" => GmailSync(args),
+            "status" => GmailStatus(args),
+            "cancel" => GmailCancel(),
+            _ => GmailHelp(),
+        };
+    }
+
+    static int AccountAddGmail()
+    {
+        string? key = RequireKey(); if (key is null) return 2;
+        if (!File.Exists(Paths.CorpusDb)) { Console.Error.WriteLine("Korpus nie istnieje - najpierw 'init'."); return 1; }
+        return RunCancelable(async cancellationToken =>
+        {
+            using var c = Db.Open(key, create: false);
+            Db.EnsureSchema(c);
+            Console.WriteLine("Otwieram systemowa przegladarke do logowania OAuth. Haslo do Gmaila nie trafia do aplikacji.");
+            GmailAccountRecord account = await GmailOAuth.ConnectAsync(c, cancellationToken).ConfigureAwait(false);
+            Console.WriteLine($"Polaczono konto: {account.Email}. Refresh token zapisano lokalnie przez DPAPI.");
+            return 0;
+        });
+    }
+
+    static int AccountList()
+    {
+        string? key = RequireKey(); if (key is null) return 2;
+        if (!File.Exists(Paths.CorpusDb)) { Console.WriteLine("Brak polaczonych kont."); return 0; }
+        using var c = Db.Open(key, create: false);
+        Db.EnsureSchema(c);
+        var accounts = GmailRepository.ListAccounts(c);
+        if (accounts.Count == 0) { Console.WriteLine("Brak polaczonych kont Gmail."); return 0; }
+        Console.WriteLine("Konta:");
+        foreach (var account in accounts)
+            Console.WriteLine($"  {account.Id,4}  {account.Email}  provider=gmail");
+        return 0;
+    }
+
+    static int AccountRemove(string selector)
+    {
+        string? key = RequireKey(); if (key is null) return 2;
+        using var c = Db.Open(key, create: false);
+        Db.EnsureSchema(c);
+        GmailAccountRecord? account = GmailRepository.FindAccount(c, selector);
+        if (account is null) { Console.Error.WriteLine("Nie znaleziono konta."); return 1; }
+        GmailOAuth.RemoveTokenAsync(account.TokenKey).GetAwaiter().GetResult();
+        GmailRepository.DeleteAccount(c, account.Id);
+        Console.WriteLine($"Odlaczono konto {account.Email}; lokalny token i dane synchronizacji zostaly usuniete.");
+        return 0;
+    }
+
+    static int GmailSync(string[] args)
+    {
+        string? key = RequireKey(); if (key is null) return 2;
+        bool full = Flag(args, "--full");
+        string? selector = GetStr(args, "--account");
+        if (!File.Exists(Paths.CorpusDb)) { Console.Error.WriteLine("Korpus nie istnieje - najpierw 'init'."); return 1; }
+
+        return RunCancelable(async cancellationToken =>
+        {
+            GmailCancellation.Clear();
+            try
+            {
+                using var c = Db.Open(key, create: false);
+                Db.EnsureSchema(c);
+                IReadOnlyList<GmailAccountRecord> accounts = selector is null
+                    ? GmailRepository.ListAccounts(c)
+                    : GmailRepository.FindAccount(c, selector) is { } selected ? [selected] : Array.Empty<GmailAccountRecord>();
+                if (accounts.Count == 0) { Console.Error.WriteLine("Brak pasujacego konta. Uzyj 'account add gmail'."); return 1; }
+
+                int exit = 0;
+                foreach (GmailAccountRecord account in accounts)
+                {
+                    GmailCancellation.ThrowIfRequested(cancellationToken);
+                    Console.WriteLine($"Gmail sync: {account.Email} ({(full ? "pelna" : "automatyczna")}).");
+                    try
+                    {
+                        using IGmailApiClient api = await GmailOAuth.CreateApiClientAsync(account, cancellationToken).ConfigureAwait(false);
+                        var progress = new InlineProgress<GmailSyncProgress>(p =>
+                            Console.WriteLine($"  {p.Phase}: przetworzono={p.Processed}, bledy={p.Errors}"));
+                        var synchronizer = new GmailSynchronizer(c, api, progress);
+                        GmailSyncResult result = await synchronizer.SyncAsync(account, full, cancellationToken).ConfigureAwait(false);
+                        Console.WriteLine($"  gotowe: przetworzono={result.Processed}, +{result.Inserted}, aktualizacje={result.Updated}, usuniete={result.Deleted}, bledy={result.Errors}");
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"  Synchronizacja nieudana: {SafeError(ex)}");
+                        exit = 1;
+                    }
+                }
+                return exit;
+            }
+            finally { GmailCancellation.Clear(); }
+        });
+    }
+
+    static int GmailStatus(string[] args)
+    {
+        string? key = RequireKey(); if (key is null) return 2;
+        string? selector = GetStr(args, "--account");
+        using var c = Db.Open(key, create: false);
+        Db.EnsureSchema(c);
+        IReadOnlyList<GmailAccountRecord> accounts = selector is null
+            ? GmailRepository.ListAccounts(c)
+            : GmailRepository.FindAccount(c, selector) is { } selected ? [selected] : Array.Empty<GmailAccountRecord>();
+        if (accounts.Count == 0) { Console.WriteLine("Brak polaczonych kont Gmail."); return 0; }
+        foreach (var account in accounts)
+        {
+            Console.WriteLine($"Konto: {account.Email}");
+            Console.WriteLine($"  wiadomosci       : {GmailRepository.MessageCount(c, account.Id)}");
+            Console.WriteLine($"  ostatni sync     : {account.LastSyncAt ?? "(brak)"}");
+            Console.WriteLine($"  pierwszy import  : {(account.InitialSyncCompleted ? "zakonczony" : "w toku / niewykonany")}");
+            Console.WriteLine($"  bledy lacznie    : {GmailRepository.ErrorCount(c, account.Id)}");
+            Console.WriteLine($"  ostatnie bledy   : {account.LastErrorCount}");
+            Console.WriteLine($"  operacja         : {account.CurrentOperation ?? "bezczynna"}");
+        }
+        return 0;
+    }
+
+    static int GmailCancel()
+    {
+        GmailCancellation.Request();
+        Console.WriteLine("Zgloszono anulowanie synchronizacji Gmail.");
+        return 0;
+    }
+
+    static int AccountHelp()
+    {
+        Console.WriteLine("Uzycie: account add gmail | account list | account remove <id|adres>");
+        return 1;
+    }
+
+    static int GmailHelp()
+    {
+        Console.WriteLine("Uzycie: gmail sync [--account <id|adres>] [--full] | gmail status [--account <id|adres>] | gmail cancel");
+        return 1;
+    }
+
+    static int RunCancelable(Func<CancellationToken, Task<int>> action)
+    {
+        using var source = new CancellationTokenSource();
+        ConsoleCancelEventHandler handler = (_, e) => { e.Cancel = true; source.Cancel(); GmailCancellation.Request(); };
+        Console.CancelKeyPress += handler;
+        try { return action(source.Token).GetAwaiter().GetResult(); }
+        catch (OperationCanceledException) { Console.Error.WriteLine("Operacja anulowana."); return 130; }
+        catch (Exception ex) { Console.Error.WriteLine(SafeError(ex)); return 1; }
+        finally { Console.CancelKeyPress -= handler; }
+    }
+
+    static string SafeError(Exception exception) => exception switch
+    {
+        GmailAuthorizationException => exception.Message,
+        FileNotFoundException => exception.Message,
+        InvalidOperationException => exception.Message,
+        _ => exception.GetType().Name,
+    };
+
+    sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
+    }
+
     static string? RequireKey()
     {
         var k = Ipc.Request("GETKEY");
@@ -275,6 +454,12 @@ static class Cli
                        [--port P --starttls]          dodaj konto IMAP (haslo chronione przez DPAPI)
               imap-list                            wypisz skonfigurowane konta IMAP
               imap-harvest [--account N] [--since yyyy-MM-dd] [--max N]   pobierz z IMAP do korpusu
+              account add gmail                    polacz konto Gmail przez OAuth 2.0 w systemowej przegladarce
+              account list                         wypisz polaczone konta
+              account remove <id|adres>             odlacz konto i usun lokalny token OAuth
+              gmail sync [--account A] [--full]     pelna lub przyrostowa synchronizacja Gmail API
+              gmail status [--account A]            stan importu, liczby i bledy synchronizacji
+              gmail cancel                         anuluj dzialajaca synchronizacje
               selftest                             dowod: SQLCipher szyfruje, zly klucz odrzucony, FTS dziala
 
             Odblokowujesz w GUI (PIN + YubiKey). Klucz zyje tylko w RAM GUI. Bez tego korpus to szyfrogram.

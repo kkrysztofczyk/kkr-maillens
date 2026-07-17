@@ -1,3 +1,14 @@
+# kkr-code2ai generated outputs
+kkr-maillens_combined*.txt
+kkr-maillens_combined*.zip
+kkr-code2ai-manifest.txt
+summary.xlsx
+
+# Local AI helper scripts and configuration
+kkr_code2ai.py
+kkr-code2ai.json
+kkr-code2ai-cli.bat
+
 # .NET build and publish output
 **/bin/
 **/obj/
@@ -43,6 +54,10 @@ session.key
 *.key
 *.pem
 *.secrets.json
+client_secret*.json
+client-secrets*.json
+gmail-oauth*.json
+oauth-client*.json
 
 # Logs, dumps and temporary files
 *.log

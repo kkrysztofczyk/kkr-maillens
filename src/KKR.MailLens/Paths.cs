@@ -17,4 +17,7 @@ static class Paths
     public static string NoiseRulesFile => Path.Combine(Base, "noise-rules.json"); // jawne reguly szumu (mail vs alert)
     public static string ImapAccountsFile => Path.Combine(Base, "imap-accounts.json"); // konta IMAP (haslo DPAPI)
     public static string ConfigFile => Path.Combine(Base, "config.json"); // konfiguracja harvestu (store filter, limit)
+    public static string GmailOAuthClientFile => Path.Combine(Base, "gmail-oauth-client.json"); // lokalna konfiguracja klienta OAuth
+    public static string GmailTokensDir => Path.Combine(Base, "oauth-tokens"); // tokeny OAuth zaszyfrowane DPAPI
+    public static string GmailCancelFile => Path.Combine(Base, "gmail-sync.cancel"); // lokalny znacznik anulowania synchronizacji
 }
