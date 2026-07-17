@@ -100,6 +100,22 @@ static class Cli
         return KKR.MailLens.Query.Run(key, args);
     }
 
+    public static int QueryContent(string[] args)
+    {
+        string? key = RequireKey(); if (key is null) return 2;
+        if (!File.Exists(Paths.CorpusDb)) { Console.Error.WriteLine("Korpus pusty - najpierw uruchom import."); return 1; }
+        return ContentSearch.Run(key, args);
+    }
+
+    public static int RebuildContentIndex()
+    {
+        string? key = RequireKey(); if (key is null) return 2;
+        using var connection = Db.Open(key, create: false);
+        Db.EnsureSchema(connection);
+        Console.WriteLine($"Odbudowano indeks segmentów: {ContentSearch.Rebuild(connection)}");
+        return 0;
+    }
+
     public static int Stats()
     {
         string? key = RequireKey(); if (key is null) return 2;
@@ -486,6 +502,9 @@ static class Cli
                                                    --folders = tylko te nazwy, np. "Inbox,Sent Items,Archive")
               query [<tekst>] [--from d] [--to d] [--sender s] [--folder inbox|sent] [--limit N] [--all|--alerts]
                                                    szukaj (FTS + filtry); domyslnie POMIJA alerty; --all=z alertami, --alerts=tylko alerty
+              query-content <tekst> [--limit N] [--raw]
+                                                   szukaj w segmentach zalacznikow z kontekstem strony/slajdu/arkusza
+              rebuild-content-index                odbuduj indeks segmentow z content_segments
               stats                                statystyki korpusu (liczby, korespondencja vs alerty, top nadawcy)
               reclassify                           przelicz kind (mail|alert) wg noise-rules.json dla calego korpusu
               analyze [--top N]                    wolumen nadawcow/folderow + podpowiedzi kandydatow na szum

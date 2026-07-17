@@ -35,6 +35,7 @@ public sealed class ContentDocumentRepositoryTests
         Assert.AreEqual("pending", db.ScalarText("SELECT status FROM content_documents;"));
         Assert.AreEqual("pending", db.ScalarText("SELECT processing_status FROM mail_attachments;"));
         Assert.AreEqual(0, db.ScalarLong("SELECT count(*) FROM content_segments;"));
+        Assert.AreEqual(0, db.ScalarLong("SELECT count(*) FROM content_fts;"));
     }
 
     [TestMethod]

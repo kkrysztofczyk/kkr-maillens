@@ -28,6 +28,12 @@ public sealed class AttachmentExtractionProcessorTests
             Assert.AreEqual("extracted", db.ScalarText("SELECT processing_status FROM mail_attachments;"));
             Assert.AreEqual("Neutralny tekst wiadomości używany do testowania indeksu",
                 db.ScalarText("SELECT clean_text FROM content_segments;"));
+            IReadOnlyList<ContentSearchHit> hits = ContentSearch.Search(db.Connection, "neutralny tekst");
+            Assert.HasCount(1, hits);
+            Assert.AreEqual("record.txt", hits[0].Filename);
+            Assert.AreEqual("Test Record", hits[0].Subject);
+            Assert.AreEqual(1, ContentSearch.Rebuild(db.Connection));
+            Assert.HasCount(1, ContentSearch.Search(db.Connection, "neutralny tekst"));
             byte[] encrypted = File.ReadAllBytes(Path.Combine(storeDirectory, blob.EncryptedPath.Replace('/', Path.DirectorySeparatorChar)));
             Assert.IsFalse(Encoding.UTF8.GetString(encrypted).Contains("Neutralny tekst", StringComparison.Ordinal));
         }

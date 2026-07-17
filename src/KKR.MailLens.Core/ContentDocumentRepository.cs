@@ -105,6 +105,7 @@ static class ContentDocumentRepository
             UPDATE mail_attachments SET processing_status=$status,error_code=NULL,error_message=NULL,updated_at=$now
             WHERE id=(SELECT attachment_id FROM content_documents WHERE id=$id);
             """, ("$status", status == "completed" ? "extracted" : status), ("$now", now), ("$id", documentId));
+        ContentSearch.IndexSavedDocument(connection, transaction, documentId);
         transaction.Commit();
     }
 

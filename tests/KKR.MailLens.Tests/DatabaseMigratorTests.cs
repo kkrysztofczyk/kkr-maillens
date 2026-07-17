@@ -19,6 +19,7 @@ public sealed class DatabaseMigratorTests
         Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM pragma_table_info('attachments') WHERE name='part_id';"));
         Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='content_documents';"));
         Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='content_segments';"));
+        Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='content_fts';"));
         Assert.AreEqual(1, db.ScalarLong("PRAGMA foreign_keys;"));
         Assert.AreEqual(5000, db.ScalarLong("PRAGMA busy_timeout;"));
     }
@@ -38,6 +39,17 @@ public sealed class DatabaseMigratorTests
                     legacy.CommandText = """
                         CREATE TABLE meta(k TEXT PRIMARY KEY, v TEXT);
                         INSERT INTO meta(k,v) VALUES('schema_version','2');
+                        CREATE TABLE mails(
+                            entry_id TEXT PRIMARY KEY,
+                            store_id TEXT, folder_path TEXT, folder_leaf TEXT, conversation_id TEXT,
+                            received TEXT, sent TEXT,
+                            sender_name TEXT, sender_email TEXT,
+                            to_recips TEXT, cc_recips TEXT,
+                            subject TEXT, body TEXT,
+                            has_attachments INTEGER, attachment_names TEXT,
+                            size INTEGER, unread INTEGER, categories TEXT,
+                            kind TEXT, harvested_at TEXT
+                        );
                         CREATE TABLE attachments(
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             message_id INTEGER NOT NULL,

@@ -15,6 +15,8 @@ return cmd switch
     "lock" => Cli.Lock(),
     "harvest" => Cli.Harvest(args),
     "query" => Cli.Query(args),
+    "query-content" => Cli.QueryContent(args),
+    "rebuild-content-index" => Cli.RebuildContentIndex(),
     "stats" => Cli.Stats(),
     "reclassify" => Cli.Reclassify(),
     "analyze" => Cli.Analyze(args),
