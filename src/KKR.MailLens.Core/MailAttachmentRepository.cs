@@ -4,11 +4,16 @@ namespace KKR.MailLens;
 
 static class MailAttachmentRepository
 {
+    internal sealed record Item(long Id, string MailEntryId, string Provider, string ProviderMessageKey,
+        string ProviderAttachmentKey, string PartId, string Filename, string MimeType, long SizeBytes,
+        string ContentId, bool IsInline, string? InlineBase64Data);
+
     public static void UpsertGmail(SqliteConnection connection, long generation,
         IReadOnlyList<GmailStoredMessage> messages)
     {
         if (messages.Count == 0) return;
         string now = DateTimeOffset.UtcNow.ToString("O");
+        var attachmentIds = new List<long>();
         using var transaction = connection.BeginTransaction();
         foreach (GmailStoredMessage message in messages)
         {
@@ -48,7 +53,8 @@ static class MailAttachmentRepository
                         size_bytes=excluded.size_bytes,
                         is_deleted=0,
                         last_seen_generation=excluded.last_seen_generation,
-                        updated_at=excluded.updated_at;
+                        updated_at=excluded.updated_at
+                    RETURNING id;
                     """,
                     ("$mail", message.EntryId), ("$message", message.GmailMessageId),
                     ("$key", attachment.ProviderKey), ("$part", attachment.PartId),
@@ -56,10 +62,43 @@ static class MailAttachmentRepository
                     ("$size", attachment.SizeBytes), ("$content", attachment.ContentId),
                     ("$inline", attachment.IsInline ? 1 : 0), ("$data", attachment.InlineBase64Data),
                     ("$generation", generation), ("$now", now));
-                command.ExecuteNonQuery();
+                attachmentIds.Add(Convert.ToInt64(command.ExecuteScalar()));
             }
         }
         transaction.Commit();
+        foreach (long attachmentId in attachmentIds)
+            ProcessingJobRepository.Enqueue(connection, "download", attachmentId);
+    }
+
+    public static Item Get(SqliteConnection connection, long id)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id,mail_entry_id,provider,provider_message_key,provider_attachment_key,part_id,
+                filename,mime_type,size_bytes,content_id,is_inline,inline_base64_data
+            FROM mail_attachments WHERE id=$id AND is_deleted=0;
+            """;
+        command.Parameters.AddWithValue("$id", id);
+        using var reader = command.ExecuteReader();
+        if (!reader.Read()) throw new InvalidOperationException("Załącznik nie istnieje.");
+        return new Item(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
+            reader.GetString(4), reader.GetString(5), reader.GetString(6), reader.GetString(7), reader.GetInt64(8),
+            reader.GetString(9), reader.GetInt64(10) != 0, reader.IsDBNull(11) ? null : reader.GetString(11));
+    }
+
+    public static void MarkDownloaded(SqliteConnection connection, long id, StoredBlob blob, string detectedMimeType)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE mail_attachments SET blob_id=$blob,mime_type=$mime,download_status='downloaded',
+                processing_status='pending',inline_base64_data=NULL,error_code=NULL,error_message=NULL,
+                updated_at=$now WHERE id=$id;
+            """;
+        command.Parameters.AddWithValue("$blob", blob.Id);
+        command.Parameters.AddWithValue("$mime", detectedMimeType);
+        command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+        command.Parameters.AddWithValue("$id", id);
+        if (command.ExecuteNonQuery() != 1) throw new InvalidOperationException("Nie udało się zaktualizować załącznika.");
     }
 
     static SqliteCommand Command(SqliteConnection connection, SqliteTransaction transaction, string sql,

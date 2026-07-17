@@ -12,8 +12,8 @@ public sealed class ProcessingJobRepositoryTests
         long attachmentId = AddAttachment(db);
         DateTimeOffset now = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
 
-        Assert.IsTrue(ProcessingJobRepository.Enqueue(db.Connection, "download", attachmentId, availableAt: now));
-        Assert.IsFalse(ProcessingJobRepository.Enqueue(db.Connection, "download", attachmentId, availableAt: now));
+        Assert.IsTrue(ProcessingJobRepository.Enqueue(db.Connection, "extract", attachmentId, priority: 10, availableAt: now));
+        Assert.IsFalse(ProcessingJobRepository.Enqueue(db.Connection, "extract", attachmentId, priority: 10, availableAt: now));
 
         ProcessingJob? leased = ProcessingJobRepository.LeaseNext(db.Connection, "worker-1", TimeSpan.FromMinutes(5), now);
         Assert.IsNotNull(leased);
@@ -29,7 +29,7 @@ public sealed class ProcessingJobRepositoryTests
         using var db = new TestDatabase();
         long attachmentId = AddAttachment(db);
         DateTimeOffset now = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
-        ProcessingJobRepository.Enqueue(db.Connection, "download", attachmentId, maxAttempts: 3, availableAt: now);
+        ProcessingJobRepository.Enqueue(db.Connection, "extract", attachmentId, priority: 10, maxAttempts: 3, availableAt: now);
         ProcessingJobRepository.LeaseNext(db.Connection, "worker-1", TimeSpan.FromMinutes(1), now);
 
         ProcessingJob? recovered = ProcessingJobRepository.LeaseNext(
@@ -46,13 +46,13 @@ public sealed class ProcessingJobRepositoryTests
         using var db = new TestDatabase();
         long attachmentId = AddAttachment(db);
         DateTimeOffset now = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
-        ProcessingJobRepository.Enqueue(db.Connection, "download", attachmentId, maxAttempts: 1, availableAt: now);
+        ProcessingJobRepository.Enqueue(db.Connection, "extract", attachmentId, priority: 10, maxAttempts: 1, availableAt: now);
         ProcessingJobRepository.LeaseNext(db.Connection, "worker-1", TimeSpan.FromMinutes(1), now);
 
         Assert.IsNull(ProcessingJobRepository.LeaseNext(
             db.Connection, "worker-2", TimeSpan.FromMinutes(1), now.AddMinutes(2)));
-        Assert.AreEqual("failed", db.ScalarText("SELECT status FROM processing_jobs;"));
-        Assert.AreEqual("lease-expired", db.ScalarText("SELECT error_code FROM processing_jobs;"));
+        Assert.AreEqual("failed", db.ScalarText("SELECT status FROM processing_jobs WHERE job_type='extract';"));
+        Assert.AreEqual("lease-expired", db.ScalarText("SELECT error_code FROM processing_jobs WHERE job_type='extract';"));
     }
 
     static long AddAttachment(TestDatabase db)
