@@ -13,9 +13,10 @@ static class DatabaseMigrator
         new Migration004MailAttachments(),
         new Migration005ProcessingJobs(),
         new Migration006StoredBlobs(),
+        new Migration007ContentDocuments(),
     ];
 
-    public const int LatestVersion = 6;
+    public const int LatestVersion = 7;
 
     public static void Migrate(SqliteConnection connection)
     {

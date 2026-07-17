@@ -17,6 +17,8 @@ public sealed class DatabaseMigratorTests
         Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='mails';"));
         Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='attachments';"));
         Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM pragma_table_info('attachments') WHERE name='part_id';"));
+        Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='content_documents';"));
+        Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='content_segments';"));
         Assert.AreEqual(1, db.ScalarLong("PRAGMA foreign_keys;"));
         Assert.AreEqual(5000, db.ScalarLong("PRAGMA busy_timeout;"));
     }
