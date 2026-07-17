@@ -1,0 +1,65 @@
+# .NET build and publish output
+**/bin/
+**/obj/
+artifacts/
+.publish/
+run/
+
+# Local SDK and tooling caches
+.tools/
+.dotnet/
+packages/
+*.nupkg
+*.snupkg
+
+# IDE and editor state
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.DotSettings.user
+
+# Test and coverage output
+TestResults/
+test-results/
+coverage/
+coverage.*
+*.trx
+*.coverage
+*.coveragexml
+
+# Local application data and secrets
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+session.key
+*.pfx
+*.p12
+*.key
+*.pem
+*.secrets.json
+
+# Logs, dumps and temporary files
+*.log
+*.dmp
+*.tmp
+*.temp
+*.bak
+*.orig
+~$*
+
+# Downloaded SDK installers
+dotnet-sdk-*.exe
+
+# OS metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local Codex workspace metadata
+.agents/

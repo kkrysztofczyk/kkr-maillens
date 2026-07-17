@@ -1,0 +1,169 @@
+using Microsoft.Data.Sqlite;
+
+namespace KKR.MailLens;
+
+/// <summary>Zapis zebranych maili do zaszyfrowanego korpusu. Upsert po entry_id (zachowuje rowid),
+/// FTS synchronizowane recznie (delete+insert po rowid). Idempotentne - ponowny harvest aktualizuje.</summary>
+static class Corpus
+{
+    public sealed record Stats(int Inserted, int Updated);
+
+    public static Stats Upsert(SqliteConnection c, IEnumerable<HarvestedMail> mails, string harvestedAt)
+    {
+        int ins = 0, upd = 0;
+        using var tx = c.BeginTransaction();
+
+        using var exists = c.CreateCommand();
+        exists.CommandText = "SELECT rowid FROM mails WHERE entry_id=$id;";
+        var pExId = exists.CreateParameter(); pExId.ParameterName = "$id"; exists.Parameters.Add(pExId);
+
+        using var up = c.CreateCommand();
+        up.CommandText = """
+            INSERT INTO mails(entry_id,store_id,folder_path,folder_leaf,conversation_id,received,sent,
+                sender_name,sender_email,to_recips,cc_recips,subject,body,has_attachments,attachment_names,
+                size,unread,categories,kind,harvested_at)
+            VALUES($entry_id,$store_id,$folder_path,$folder_leaf,$conversation_id,$received,$sent,
+                $sender_name,$sender_email,$to_recips,$cc_recips,$subject,$body,$has_attachments,$attachment_names,
+                $size,$unread,$categories,$kind,$harvested_at)
+            ON CONFLICT(entry_id) DO UPDATE SET
+                store_id=excluded.store_id, folder_path=excluded.folder_path, folder_leaf=excluded.folder_leaf,
+                conversation_id=excluded.conversation_id, received=excluded.received, sent=excluded.sent,
+                sender_name=excluded.sender_name, sender_email=excluded.sender_email,
+                to_recips=excluded.to_recips, cc_recips=excluded.cc_recips,
+                subject=excluded.subject, body=excluded.body, has_attachments=excluded.has_attachments,
+                attachment_names=excluded.attachment_names, size=excluded.size, unread=excluded.unread,
+                categories=excluded.categories, kind=excluded.kind, harvested_at=excluded.harvested_at;
+            """;
+        var p = new Dictionary<string, SqliteParameter>();
+        foreach (var n in new[] { "entry_id","store_id","folder_path","folder_leaf","conversation_id","received","sent",
+            "sender_name","sender_email","to_recips","cc_recips","subject","body","has_attachments","attachment_names",
+            "size","unread","categories","kind","harvested_at" })
+        { var pp = up.CreateParameter(); pp.ParameterName = "$" + n; up.Parameters.Add(pp); p[n] = pp; }
+
+        using var ftsDel = c.CreateCommand();
+        ftsDel.CommandText = "DELETE FROM mails_fts WHERE rowid=$rid;";
+        var pDelRid = ftsDel.CreateParameter(); pDelRid.ParameterName = "$rid"; ftsDel.Parameters.Add(pDelRid);
+
+        using var ftsIns = c.CreateCommand();
+        ftsIns.CommandText = "INSERT INTO mails_fts(rowid,subject,body,sender,recips) VALUES($rid,$subject,$body,$sender,$recips);";
+        var fRid = ftsIns.CreateParameter(); fRid.ParameterName = "$rid"; ftsIns.Parameters.Add(fRid);
+        var fSub = ftsIns.CreateParameter(); fSub.ParameterName = "$subject"; ftsIns.Parameters.Add(fSub);
+        var fBody = ftsIns.CreateParameter(); fBody.ParameterName = "$body"; ftsIns.Parameters.Add(fBody);
+        var fSend = ftsIns.CreateParameter(); fSend.ParameterName = "$sender"; ftsIns.Parameters.Add(fSend);
+        var fRec = ftsIns.CreateParameter(); fRec.ParameterName = "$recips"; ftsIns.Parameters.Add(fRec);
+
+        // rowid dla nowego wiersza bez powtornego SELECT WHERE entry_id (b-tree probe) - INSERT wlasnie go nadal.
+        using var lastId = c.CreateCommand();
+        lastId.CommandText = "SELECT last_insert_rowid();";
+
+        foreach (var m in mails)
+        {
+            if (string.IsNullOrEmpty(m.EntryId)) continue;
+            pExId.Value = m.EntryId;
+            object? existingRid = exists.ExecuteScalar();
+            bool isNew = existingRid is null or DBNull;
+
+            p["entry_id"].Value = m.EntryId;
+            p["store_id"].Value = m.StoreId;
+            p["folder_path"].Value = m.FolderPath;
+            p["folder_leaf"].Value = m.FolderLeaf;
+            p["conversation_id"].Value = (object?)m.ConversationId ?? DBNull.Value;
+            p["received"].Value = (object?)m.Received ?? DBNull.Value;
+            p["sent"].Value = (object?)m.Sent ?? DBNull.Value;
+            p["sender_name"].Value = m.SenderName;
+            p["sender_email"].Value = m.SenderEmail;
+            p["to_recips"].Value = m.ToRecips;
+            p["cc_recips"].Value = m.CcRecips;
+            p["subject"].Value = m.Subject;
+            p["body"].Value = m.Body;
+            p["has_attachments"].Value = m.HasAttachments ? 1 : 0;
+            p["attachment_names"].Value = m.AttachmentNames;
+            p["size"].Value = m.Size;
+            p["unread"].Value = m.Unread ? 1 : 0;
+            p["categories"].Value = m.Categories;
+            p["kind"].Value = Classify.Kind(m);
+            p["harvested_at"].Value = harvestedAt;
+            up.ExecuteNonQuery();
+
+            // existing: rowid zachowany przez ON CONFLICT DO UPDATE; new: swiezy INSERT -> last_insert_rowid()
+            long rid = isNew ? Convert.ToInt64(lastId.ExecuteScalar()) : Convert.ToInt64(existingRid);
+            pDelRid.Value = rid; ftsDel.ExecuteNonQuery();
+            fRid.Value = rid;
+            fSub.Value = m.Subject;
+            fBody.Value = m.Body;
+            fSend.Value = m.SenderName + " " + m.SenderEmail;
+            fRec.Value = m.ToRecips + " " + m.CcRecips;
+            ftsIns.ExecuteNonQuery();
+
+            if (isNew) ins++; else upd++;
+        }
+
+        SetMeta(c, "last_harvest", harvestedAt);
+        tx.Commit();
+        return new(ins, upd);
+    }
+
+    public static void SetMeta(SqliteConnection c, string k, string v)
+    {
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "INSERT INTO meta(k,v) VALUES($k,$v) ON CONFLICT(k) DO UPDATE SET v=excluded.v;";
+        var pk = cmd.CreateParameter(); pk.ParameterName = "$k"; pk.Value = k; cmd.Parameters.Add(pk);
+        var pv = cmd.CreateParameter(); pv.ParameterName = "$v"; pv.Value = v; cmd.Parameters.Add(pv);
+        cmd.ExecuteNonQuery();
+    }
+
+    public static long Count(SqliteConnection c)
+    {
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT count(*) FROM mails;";
+        return Convert.ToInt64(cmd.ExecuteScalar());
+    }
+
+    /// <summary>Czas ostatniego harvestu (meta 'last_harvest', "yyyy-MM-dd HH:mm:ss") albo null.</summary>
+    public static string? LastHarvest(SqliteConnection c)
+    {
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT v FROM meta WHERE k='last_harvest';";
+        return cmd.ExecuteScalar() as string;
+    }
+
+    /// <summary>Przelicza kolumne 'kind' dla WSZYSTKICH wierszy wg [[NoiseRules]] (config, w C# = jedno
+    /// zrodlo prawdy z harvestem). Zwraca ile 'alert'. FTS bez zmian - filtr jest na tabeli mails.</summary>
+    public static int Reclassify(SqliteConnection c)
+    {
+        NoiseRules.Reload(); // swieze reguly z pliku
+        // (rowid, folder_leaf, sender_email, sender_name, obecny kind) - by aktualizowac TYLKO zmienione wiersze
+        var rows = new List<(long Rid, string Fl, string Se, string Sn, string Cur)>();
+        using (var sel = c.CreateCommand())
+        {
+            sel.CommandText = "SELECT rowid, folder_leaf, sender_email, sender_name, kind FROM mails;";
+            using var r = sel.ExecuteReader();
+            while (r.Read())
+                rows.Add((r.GetInt64(0), r.IsDBNull(1) ? "" : r.GetString(1), r.IsDBNull(2) ? "" : r.GetString(2),
+                          r.IsDBNull(3) ? "" : r.GetString(3), r.IsDBNull(4) ? "" : r.GetString(4)));
+        }
+        using var tx = c.BeginTransaction();
+        using var upd = c.CreateCommand();
+        upd.CommandText = "UPDATE mails SET kind=$k WHERE rowid=$r;";
+        var pk = upd.CreateParameter(); pk.ParameterName = "$k"; upd.Parameters.Add(pk);
+        var pr = upd.CreateParameter(); pr.ParameterName = "$r"; upd.Parameters.Add(pr);
+        int alerts = 0;
+        foreach (var row in rows)
+        {
+            string kind = Classify.Kind(row.Fl, row.Se, row.Sn);
+            if (kind == "alert") alerts++;
+            if (kind != row.Cur) { pk.Value = kind; pr.Value = row.Rid; upd.ExecuteNonQuery(); } // pomijamy niezmienione (zwykle wiekszosc)
+        }
+        tx.Commit();
+        return alerts;
+    }
+}
+
+/// <summary>Klasyfikacja maila: 'mail' (korespondencja) vs 'alert' (szum) - deterministycznie wg [[NoiseRules]].</summary>
+static class Classify
+{
+    public static string Kind(HarvestedMail m) => Kind(m.FolderLeaf, m.SenderEmail, m.SenderName);
+
+    public static string Kind(string? folderLeaf, string? senderEmail, string? senderName) =>
+        NoiseRules.Load().IsNoise(folderLeaf, senderEmail, senderName) ? "alert" : "mail";
+}

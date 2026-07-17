@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KKR MailLens — dokumentacja</title>
+  <style>
+    :root { --bg:#f7f8fa; --card:#fff; --ink:#1b2230; --muted:#5b6472; --accent:#6317cd; --line:#e6e8ee; --code:#f0f1f5; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.6 Segoe UI,Arial,sans-serif; }
+    main { max-width:920px; margin:0 auto; padding:32px 20px 80px; }
+    header { border-bottom:3px solid var(--accent); padding-bottom:16px; margin-bottom:28px; }
+    h1 { margin:0 0 4px; font-size:28px; }
+    h2 { font-size:20px; margin:8px 0 12px; }
+    section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px 22px; margin-bottom:18px; }
+    code, pre { background:var(--code); border-radius:4px; font:13px/1.5 Consolas,monospace; }
+    code { padding:1px 6px; }
+    pre { padding:12px 14px; overflow:auto; }
+    li { margin:4px 0; }
+    .tag { color:var(--muted); }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>KKR MailLens</h1>
+    <div class="tag">Lokalny, szyfrowany indeks poczty z wyszukiwaniem SQLCipher + FTS5.</div>
+  </header>
+
+  <section>
+    <h2>Opis</h2>
+    <p>Aplikacja importuje pocztę ze źródła desktopowego obsługiwanego przez COM lub z serwera IMAP. Wiadomości trafiają do lokalnej, zaszyfrowanej bazy SQLite. Klucz aktywnej sesji istnieje wyłącznie w RAM procesu GUI.</p>
+  </section>
+
+  <section>
+    <h2>Szybki start</h2>
+    <ol>
+      <li>Uruchom <code>run\KKR.MailLens.Gui.exe</code>.</li>
+      <li>Ustaw PIN i zainicjuj bazę.</li>
+      <li>Odblokuj sesję.</li>
+      <li>Uruchom import przyciskiem <b>Harvest</b>.</li>
+      <li>Wyszukuj w GUI lub przez <code>run\KKR.MailLens.exe query "neutralny tekst"</code>.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Neutralny przykład</h2>
+    <ul>
+      <li>temat: <code>Test Record</code></li>
+      <li>nadawca: <code>sender@example.invalid</code></li>
+      <li>odbiorca: <code>recipient@example.invalid</code></li>
+      <li>treść: <code>Neutralny tekst wiadomości używany do testowania indeksu</code></li>
+      <li>fraza: <code>neutralny tekst</code></li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>IMAP</h2>
+    <p>Dane w przykładzie używają zarezerwowanej domeny <code>.invalid</code> i należy je zastąpić własną konfiguracją.</p>
+    <pre>run\KKR.MailLens.exe imap-add --host imap.example.invalid --user sender@example.invalid
+run\KKR.MailLens.exe imap-harvest --account sender@example.invalid --since 2026-01-01</pre>
+  </section>
+
+  <section>
+    <h2>Dane i bezpieczeństwo</h2>
+    <p>Domyślny katalog to <code>%LOCALAPPDATA%\kkr-maillens</code>; zmienna <code>KKR_MAILLENS_DIR</code> pozwala wskazać inną lokalizację. SQLCipher, schemat SQLite, indeks FTS5 i idempotentny upsert pozostają częścią dotychczasowego przepływu.</p>
+  </section>
+
+  <section>
+    <h2>Build</h2>
+    <pre>dotnet build KKR.MailLens.sln
+dotnet run --project src\KKR.MailLens\KKR.MailLens.csproj -- selftest</pre>
+  </section>
+</main>
+</body>
+</html>

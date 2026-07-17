@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- net9.0-windows: COM (Outlook) + DPAPI (ProtectedData) -->
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>KKR.MailLens</AssemblyName>
+    <RootNamespace>KKR.MailLens</RootNamespace>
+    <Product>KKR MailLens</Product>
+    <Title>KKR MailLens</Title>
+    <Description>Lokalne, szyfrowane indeksowanie i wyszukiwanie poczty.</Description>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- SQLCipher: bundle_e_sqlcipher podmienia natywny SQLite na wersje szyfrujaca (AES-256) -->
+    <PackageReference Include="MailKit" Version="4.17.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="9.0.0" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlcipher" Version="2.1.10" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.0" />
+    <PackageReference Include="Yubico.YubiKey" Version="1.17.1" />
+  </ItemGroup>
+
+</Project>
