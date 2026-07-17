@@ -3,5 +3,8 @@
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
     <PathMap>$(MSBuildThisFileDirectory)=/_/</PathMap>
+    <Authors>Krzysztof Krysztofczyk</Authors>
+    <RepositoryUrl>https://github.com/kkrysztofczyk/kkr-maillens</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 </Project>
