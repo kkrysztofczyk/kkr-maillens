@@ -18,7 +18,7 @@ dotnet publish src\KKR.MailLens\KKR.MailLens.csproj -c Release -o run -p:DebugTy
 dotnet publish src\KKR.MailLens.Gui\KKR.MailLens.Gui.csproj -c Release -o run -p:DebugType=None -p:DebugSymbols=false
 ```
 
-Projekty znajdują się w `src\KKR.MailLens` i `src\KKR.MailLens.Gui`. Assembly oraz artefakty uruchomieniowe nazywają się odpowiednio `KKR.MailLens` i `KKR.MailLens.Gui`.
+Solution składa się z biblioteki `src\KKR.MailLens.Core`, aplikacji CLI `src\KKR.MailLens` oraz aplikacji WinForms `src\KKR.MailLens.Gui`. CLI i GUI korzystają z tego samego rdzenia przez `ProjectReference`; nie linkują ręcznie plików źródłowych. Assembly wykonywalne nazywają się odpowiednio `KKR.MailLens` i `KKR.MailLens.Gui`.
 
 ## Szybki start
 

@@ -15,13 +15,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- SQLCipher: bundle_e_sqlcipher podmienia natywny SQLite na wersje szyfrujaca (AES-256) -->
-    <PackageReference Include="Google.Apis.Gmail.v1" Version="1.74.0.4162" />
-    <PackageReference Include="MailKit" Version="4.17.0" />
-    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="9.0.0" />
-    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlcipher" Version="2.1.10" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.0" />
-    <PackageReference Include="Yubico.YubiKey" Version="1.17.1" />
+    <ProjectReference Include="..\KKR.MailLens.Core\KKR.MailLens.Core.csproj" />
   </ItemGroup>
 
 </Project>

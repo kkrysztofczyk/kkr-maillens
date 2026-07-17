@@ -13,27 +13,8 @@
     <Description>Interfejs graficzny KKR MailLens.</Description>
   </PropertyGroup>
 
-  <!-- Rdzen wspoldzielony z CLI (jedno zrodlo prawdy - linkowane, nie kopiowane). Program.cs/Cli.cs/SelfTest.cs pomijamy. -->
   <ItemGroup>
-    <Compile Include="..\KKR.MailLens\Crypto.cs" Link="core\Crypto.cs" />
-    <Compile Include="..\KKR.MailLens\Setup.cs" Link="core\Setup.cs" />
-    <Compile Include="..\KKR.MailLens\NoiseRules.cs" Link="core\NoiseRules.cs" />
-    <Compile Include="..\KKR.MailLens\Ipc.cs" Link="core\Ipc.cs" />
-    <Compile Include="..\KKR.MailLens\Paths.cs" Link="core\Paths.cs" />
-    <Compile Include="..\KKR.MailLens\Config.cs" Link="core\Config.cs" />
-    <Compile Include="..\KKR.MailLens\Session.cs" Link="core\Session.cs" />
-    <Compile Include="..\KKR.MailLens\Db.cs" Link="core\Db.cs" />
-    <Compile Include="..\KKR.MailLens\Corpus.cs" Link="core\Corpus.cs" />
-    <Compile Include="..\KKR.MailLens\Query.cs" Link="core\Query.cs" />
-    <Compile Include="..\KKR.MailLens\YubiKey.cs" Link="core\YubiKey.cs" />
-    <Compile Include="..\KKR.MailLens\Outlook.cs" Link="core\Outlook.cs" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="9.0.0" />
-    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlcipher" Version="2.1.10" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.0" />
-    <PackageReference Include="Yubico.YubiKey" Version="1.17.1" />
+    <ProjectReference Include="..\KKR.MailLens.Core\KKR.MailLens.Core.csproj" />
   </ItemGroup>
 
 </Project>

@@ -15,7 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\KKR.MailLens\KKR.MailLens.csproj" />
+    <ProjectReference Include="..\..\src\KKR.MailLens.Core\KKR.MailLens.Core.csproj" />
   </ItemGroup>
 
 </Project>
