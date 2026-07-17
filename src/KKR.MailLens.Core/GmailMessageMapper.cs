@@ -111,9 +111,12 @@ static partial class GmailMessageMapper
             attachments.Add(new GmailAttachmentRecord(
                 part.PartId ?? "",
                 part.AttachmentId ?? "",
+                part.Data,
                 DecodeHeader(part.Filename ?? ""),
                 mime,
-                Math.Max(0, part.Size)));
+                Math.Max(0, part.Size),
+                Header(part, "Content-ID").Trim().Trim('<', '>'),
+                Header(part, "Content-Disposition").Contains("inline", StringComparison.OrdinalIgnoreCase)));
         }
 
         if (!namedAttachment && mime == "text/plain" && !string.IsNullOrEmpty(part.Data))

@@ -10,9 +10,10 @@ static class DatabaseMigrator
         new Migration001InitialCorpus(),
         new Migration002Gmail(),
         new Migration003AttachmentState(),
+        new Migration004MailAttachments(),
     ];
 
-    public const int LatestVersion = 3;
+    public const int LatestVersion = 4;
 
     public static void Migrate(SqliteConnection connection)
     {

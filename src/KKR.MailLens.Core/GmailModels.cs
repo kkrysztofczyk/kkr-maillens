@@ -40,9 +40,17 @@ sealed class GmailApiMessage
 sealed record GmailAttachmentRecord(
     string PartId,
     string GmailAttachmentId,
+    string? InlineBase64Data,
     string Filename,
     string MimeType,
-    long SizeBytes);
+    long SizeBytes,
+    string ContentId,
+    bool IsInline)
+{
+    public string ProviderKey => !string.IsNullOrWhiteSpace(GmailAttachmentId)
+        ? GmailAttachmentId
+        : $"part:{PartId}";
+}
 
 sealed class GmailStoredMessage
 {

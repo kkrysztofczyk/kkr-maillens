@@ -59,7 +59,7 @@ public sealed class DatabaseMigratorTests
 
                 Db.EnsureSchema(connection);
 
-                Assert.AreEqual("3", ScalarText(connection, "SELECT v FROM meta WHERE k='schema_version';"));
+                Assert.AreEqual(Db.SchemaVersion.ToString(), ScalarText(connection, "SELECT v FROM meta WHERE k='schema_version';"));
                 Assert.AreEqual("downloaded", ScalarText(connection, "SELECT download_status FROM attachments;"));
                 Assert.AreEqual("encrypted/blob-1", ScalarText(connection, "SELECT local_path FROM attachments;"));
                 Assert.AreEqual("Neutralny tekst", ScalarText(connection, "SELECT extracted_text FROM attachments;"));
@@ -67,6 +67,8 @@ public sealed class DatabaseMigratorTests
                 Assert.AreEqual("retained", ScalarText(connection, "SELECT error_message FROM attachments;"));
                 Assert.AreEqual(3, ScalarLong(connection,
                     "SELECT count(*) FROM pragma_table_info('attachments') WHERE name IN ('part_id','is_deleted','last_seen_generation');"));
+                Assert.AreEqual(1, ScalarLong(connection,
+                    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='mail_attachments';"));
             }
         }
         finally

@@ -179,6 +179,7 @@ sealed class GmailSynchronizer
         {
             string stamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
             Corpus.Upsert(_database, saved.Saved.Select(x => GmailMessageMapper.ToHarvested(x, labelNames)), stamp);
+            MailAttachmentRepository.UpsertGmail(_database, account.SyncGeneration, saved.Saved);
         }
 
         return new PageResult(saved.Inserted, saved.Updated, deleted, failures.Count + saved.FailedMessageIds.Count);
