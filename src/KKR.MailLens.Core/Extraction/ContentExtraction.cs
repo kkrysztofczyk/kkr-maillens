@@ -1,0 +1,50 @@
+using System.Text;
+
+namespace KKR.MailLens;
+
+sealed record DetectedFile(string Filename, string MimeType, string Extension, byte[] Content);
+
+sealed record ExtractionResult(
+    string DetectedMimeType,
+    string RawText,
+    string CleanText,
+    bool WasTruncated);
+
+sealed record TextExtractionOptions(int MaxBytes = 25 * 1024 * 1024, int MaxCharacters = 2_000_000)
+{
+    public void Validate()
+    {
+        if (MaxBytes <= 0) throw new ArgumentOutOfRangeException(nameof(MaxBytes));
+        if (MaxCharacters <= 0) throw new ArgumentOutOfRangeException(nameof(MaxCharacters));
+    }
+}
+
+interface IContentExtractor
+{
+    bool CanExtract(DetectedFile file);
+    ExtractionResult Extract(DetectedFile file, TextExtractionOptions options);
+}
+
+sealed class ContentExtractionDispatcher
+{
+    readonly IReadOnlyList<IContentExtractor> extractors;
+    readonly TextExtractionOptions options;
+
+    public ContentExtractionDispatcher(
+        IEnumerable<IContentExtractor>? extractors = null,
+        TextExtractionOptions? options = null)
+    {
+        this.extractors = (extractors ?? [new PlainTextExtractor(), new HtmlContentExtractor()]).ToArray();
+        this.options = options ?? new TextExtractionOptions();
+        this.options.Validate();
+    }
+
+    public ExtractionResult Extract(string filename, string? declaredMimeType, byte[] content)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        DetectedFile file = FileTypeDetector.Detect(filename, declaredMimeType, content);
+        IContentExtractor extractor = extractors.FirstOrDefault(candidate => candidate.CanExtract(file))
+            ?? throw new NotSupportedException($"Nieobsługiwany typ pliku: {file.MimeType}.");
+        return extractor.Extract(file, options);
+    }
+}
