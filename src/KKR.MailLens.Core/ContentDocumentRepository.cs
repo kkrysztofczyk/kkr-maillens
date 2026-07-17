@@ -75,8 +75,8 @@ static class ContentDocumentRepository
             reader.GetString(3), reader.GetString(4), reader.GetInt32(5), reader.GetString(6));
     }
 
-    public static void SaveExtraction(SqliteConnection connection, long documentId, ExtractionResult result,
-        string extractorName, string extractorVersion)
+    public static string SaveExtraction(SqliteConnection connection, long documentId, ExtractionResult result,
+        string extractorName, string extractorVersion, string documentKind = "attachment", string? modelName = null)
     {
         string now = DateTimeOffset.UtcNow.ToString("O");
         bool canUseOcr = result.DetectedMimeType == "application/pdf"
@@ -96,17 +96,19 @@ static class ContentDocumentRepository
                 ("$metadata", segment.MetadataJson));
         }
         Execute(connection, transaction, """
-            UPDATE content_documents SET detected_mime_type=$mime,extractor_name=$extractor,
-                extractor_version=$version,status=$status,error_code=NULL,error_message=NULL,processed_at=$now
+            UPDATE content_documents SET document_kind=$kind,detected_mime_type=$mime,extractor_name=$extractor,
+                extractor_version=$version,model_name=$model,status=$status,
+                error_code=NULL,error_message=NULL,processed_at=$now
             WHERE id=$id;
-            """, ("$mime", result.DetectedMimeType), ("$extractor", extractorName),
-            ("$version", extractorVersion), ("$status", status), ("$now", now), ("$id", documentId));
+            """, ("$kind", documentKind), ("$mime", result.DetectedMimeType), ("$extractor", extractorName),
+            ("$version", extractorVersion), ("$model", modelName), ("$status", status), ("$now", now), ("$id", documentId));
         Execute(connection, transaction, """
             UPDATE mail_attachments SET processing_status=$status,error_code=NULL,error_message=NULL,updated_at=$now
             WHERE id=(SELECT attachment_id FROM content_documents WHERE id=$id);
             """, ("$status", status == "completed" ? "extracted" : status), ("$now", now), ("$id", documentId));
         ContentSearch.IndexSavedDocument(connection, transaction, documentId);
         transaction.Commit();
+        return status;
     }
 
     public static void MarkFailed(SqliteConnection connection, long documentId, string code, string message)

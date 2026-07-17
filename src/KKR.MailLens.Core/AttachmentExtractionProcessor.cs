@@ -3,9 +3,11 @@ using Microsoft.Data.Sqlite;
 
 namespace KKR.MailLens;
 
+sealed record AttachmentExtractionOutcome(string Status, string DetectedMimeType);
+
 static class AttachmentExtractionProcessor
 {
-    public static void Process(SqliteConnection connection, EncryptedBlobStore store,
+    public static AttachmentExtractionOutcome Process(SqliteConnection connection, EncryptedBlobStore store,
         long attachmentId, long documentId)
     {
         MailAttachmentRepository.Item item = MailAttachmentRepository.Get(connection, attachmentId);
@@ -14,8 +16,13 @@ static class AttachmentExtractionProcessor
         byte[] plaintext = store.Read(blob);
         try
         {
-            ExtractionResult result = new ContentExtractionDispatcher().Extract(item.Filename, item.MimeType, plaintext);
-            ContentDocumentRepository.SaveExtraction(connection, documentId, result, ExtractorName(result), "1");
+            DetectedFile detected = FileTypeDetector.Detect(item.Filename, item.MimeType, plaintext);
+            ExtractionResult result = detected.MimeType.StartsWith("image/", StringComparison.Ordinal)
+                ? new ExtractionResult(detected.MimeType, "", "", false, [])
+                : new ContentExtractionDispatcher().Extract(item.Filename, item.MimeType, plaintext);
+            string status = ContentDocumentRepository.SaveExtraction(
+                connection, documentId, result, ExtractorName(result), "1");
+            return new AttachmentExtractionOutcome(status, result.DetectedMimeType);
         }
         finally
         {

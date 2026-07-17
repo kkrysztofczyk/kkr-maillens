@@ -13,6 +13,9 @@ sealed class AppConfig
 {
     public string StoreFilter { get; set; } = "";   // fragment nazwy skrzynki Outlook (DisplayName); "" = wszystkie
     public int MaxPerFolder { get; set; } = 5000;    // cap elementow skanowanych na folder; <=0 = bez limitu
+    public string TesseractPath { get; set; } = "tesseract.exe";
+    public string OcrLanguages { get; set; } = "pol+eng";
+    public int OcrTimeoutSeconds { get; set; } = 120;
 
     /// <summary>Efektywny cap dla skanera (&lt;=0 traktujemy jako "bez limitu"). Nie serializowane.</summary>
     [JsonIgnore]

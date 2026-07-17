@@ -30,7 +30,18 @@ do
             case "extract":
                 if (job.AttachmentId is null || job.DocumentId is null)
                     throw new InvalidDataException("Zadanie ekstrakcji nie wskazuje dokumentu i załącznika.");
-                AttachmentExtractionProcessor.Process(connection, store, job.AttachmentId.Value, job.DocumentId.Value);
+                AttachmentExtractionOutcome outcome = AttachmentExtractionProcessor.Process(
+                    connection, store, job.AttachmentId.Value, job.DocumentId.Value);
+                if (outcome.Status == "needs-ocr" && outcome.DetectedMimeType.StartsWith("image/", StringComparison.Ordinal))
+                    ProcessingJobRepository.Enqueue(connection, "ocr", job.AttachmentId.Value, job.DocumentId.Value);
+                break;
+            case "ocr":
+                if (job.AttachmentId is null || job.DocumentId is null)
+                    throw new InvalidDataException("Zadanie OCR nie wskazuje dokumentu i załącznika.");
+                AppConfig config = AppConfig.Load();
+                await OcrAttachmentProcessor.ProcessAsync(connection, store, job.AttachmentId.Value,
+                    job.DocumentId.Value, new TesseractOptions(config.TesseractPath, config.OcrLanguages,
+                        TimeSpan.FromSeconds(Math.Clamp(config.OcrTimeoutSeconds, 10, 3600))), CancellationToken.None);
                 break;
             default:
                 throw new NotSupportedException($"Nieobsługiwany typ zadania: {job.JobType}");

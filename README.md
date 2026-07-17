@@ -8,6 +8,7 @@ KKR MailLens tworzy lokalny, szyfrowany indeks poczty do wyszukiwania pełnoteks
 - .NET 9 Desktop Runtime do uruchomienia; SDK 9.0.316 do budowania i testów
 - źródło desktopowe obsługiwane przez integrację COM, konto IMAP albo konto Gmail połączone przez OAuth 2.0
 - opcjonalny sprzętowy drugi składnik uwierzytelnienia
+- opcjonalnie Tesseract 5 z danymi językowymi `pol` i `eng` do lokalnego OCR obrazów
 
 ## Build
 
@@ -59,11 +60,27 @@ run\KKR.MailLens.exe gmail sync
 run\KKR.MailLens.exe gmail status
 run\KKR.MailLens.exe processing-status
 run\KKR.MailLens.exe processing-run
+run\KKR.MailLens.exe query-content "neutralny tekst"
 ```
 
 Pełną kontrolowaną synchronizację wymusza `gmail sync --full`. Działającą synchronizację można zatrzymać z drugiego terminala poleceniem `gmail cancel`. Przy wielu kontach służy parametr `--account <id|adres>`.
 
 Pierwszy import jest stronicowany i zapamiętuje checkpoint. Kolejne uruchomienia korzystają z historii zmian Gmaila; po wygaśnięciu `historyId` aplikacja automatycznie wykonuje kontrolowany full sync bez duplikowania danych. Importowane są także wiadomości zarchiwizowane, etykiety, flagi unread/spam/trash oraz metadane załączników.
+
+## Załączniki, ekstrakcja i OCR
+
+Worker pobiera załączniki Gmaila do deduplikowanego magazynu szyfrowanego AES-GCM. Jawna zawartość jest odszyfrowywana wyłącznie w pamięci procesu. Obsługiwane ekstraktory deterministyczne obejmują TXT/CSV/XML/JSON, HTML, PDF z warstwą tekstową oraz DOCX/XLSX/PPTX. Segmenty zachowują odpowiednio numer strony, slajdu lub nazwę arkusza i trafiają do osobnego indeksu FTS5.
+
+OCR obrazów PNG/JPEG/TIFF/BMP korzysta z lokalnego Tesseracta przez `stdin`/`stdout`, bez tworzenia jawnego pliku tymczasowego. Domyślne języki to `pol+eng`; ścieżkę, języki i timeout można ustawić poleceniem:
+
+```powershell
+run\KKR.MailLens.exe config --tesseract "C:\Program Files\Tesseract-OCR\tesseract.exe" --ocr-languages pol+eng --ocr-timeout 120
+run\KKR.MailLens.exe processing-run
+run\KKR.MailLens.exe query-content "neutralny tekst"
+run\KKR.MailLens.exe rebuild-content-index
+```
+
+PDF bez użytecznej warstwy tekstowej otrzymuje status `needs-ocr`. Renderowanie stron skanowanego PDF do obrazów jest kolejnym etapem i nie jest jeszcze wykonywane automatycznie.
 
 ## Neutralne dane przykładowe
 
@@ -89,4 +106,4 @@ Pełną listę poleceń pokazuje:
 run\KKR.MailLens.exe help
 ```
 
-Najważniejsze operacje to `init`, `status`, `lock`, `config`, `harvest`, `account`, `gmail`, `imap-add`, `imap-list`, `imap-harvest`, `query`, `stats`, `analyze`, `analyze-rules`, `reclassify` i `selftest`.
+Najważniejsze operacje to `init`, `status`, `lock`, `config`, `harvest`, `account`, `gmail`, `processing-run`, `processing-status`, `processing-retry`, `query`, `query-content`, `rebuild-content-index`, `stats`, `analyze`, `analyze-rules`, `reclassify` i `selftest`.

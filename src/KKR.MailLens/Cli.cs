@@ -46,12 +46,18 @@ static class Cli
         bool changed = false;
         if (GetStr(args, "--store") is { } s) { cfg.StoreFilter = s.Trim(); changed = true; }
         if (GetStr(args, "--max") is { } mx && int.TryParse(mx, out var m)) { cfg.MaxPerFolder = m; changed = true; }
+        if (GetStr(args, "--tesseract") is { } tess) { cfg.TesseractPath = tess.Trim(); changed = true; }
+        if (GetStr(args, "--ocr-languages") is { } languages) { cfg.OcrLanguages = languages.Trim(); changed = true; }
+        if (GetStr(args, "--ocr-timeout") is { } timeout && int.TryParse(timeout, out int seconds))
+        { cfg.OcrTimeoutSeconds = Math.Clamp(seconds, 10, 3600); changed = true; }
         if (changed) { cfg.Save(); Console.WriteLine($"Zapisano config: {Paths.ConfigFile}"); }
 
         Console.WriteLine($"Katalog danych: {Paths.Base}");
         Console.WriteLine($"store filter : '{cfg.StoreFilter}'{(cfg.StoreFilter.Length == 0 ? "  (wszystkie skrzynki)" : "")}");
         Console.WriteLine($"max/folder   : {cfg.MaxPerFolder}{(cfg.MaxPerFolder <= 0 ? "  (bez limitu)" : "")}");
-        if (!changed) Console.WriteLine("Zmiana: config --store \"<fragment nazwy skrzynki>\" [--max <N>]  (0 = bez limitu)");
+        Console.WriteLine($"Tesseract    : {cfg.TesseractPath}");
+        Console.WriteLine($"OCR          : {cfg.OcrLanguages}, timeout {cfg.OcrTimeoutSeconds} s");
+        if (!changed) Console.WriteLine("Zmiana: config [--store <fragment>] [--max N] [--tesseract <sciezka>] [--ocr-languages pol+eng] [--ocr-timeout N]");
         return 0;
     }
 
@@ -495,8 +501,8 @@ static class Cli
                                                    Krok pierwszy. --force nadpisuje (KASUJE dane). Potem odblokuj w GUI.
               status                               stan sesji (z agenta GUI) + katalog danych
               lock                                 zablokuj sesje GUI (usun klucz z RAM)
-              config [--store <fragm>] [--max <N>] pokaz/ustaw konfiguracje harvestu (skrzynka + limit/folder;
-                                                   store="" = wszystkie skrzynki, max<=0 = bez limitu)
+              config [--store <fragm>] [--max <N>] [--tesseract <sciezka>] [--ocr-languages pol+eng]
+                                                   konfiguracja importu i lokalnego OCR
               harvest [--store <fragm>] [--since yyyy-MM-dd] [--max <N>] [--folders "A,B,C"]
                                                    zbierz foldery do korpusu (store/limit domyslnie z config.json;
                                                    --folders = tylko te nazwy, np. "Inbox,Sent Items,Archive")

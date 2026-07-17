@@ -37,11 +37,23 @@ Logowanie otwiera się w systemowej przeglądarce. Aplikacja nie pobiera hasła;
 
 ```powershell
 run\KKR.MailLens.exe query "neutralny tekst"
+run\KKR.MailLens.exe query-content "neutralny tekst"
 run\KKR.MailLens.exe stats
 run\KKR.MailLens.exe help
 ```
 
 Neutralny rekord testowy ma temat `Test Record`, nadawcę `sender@example.invalid`, odbiorcę `recipient@example.invalid` i treść `Neutralny tekst wiadomości używany do testowania indeksu`.
+
+## Załączniki i lokalny OCR
+
+TXT/HTML/PDF/DOCX/XLSX/PPTX są ekstrahowane przez osobny proces Worker, a pliki źródłowe pozostają w zaszyfrowanym magazynie. Dla obrazów PNG/JPEG/TIFF/BMP można skonfigurować lokalny Tesseract 5:
+
+```powershell
+run\KKR.MailLens.exe config --tesseract "C:\Program Files\Tesseract-OCR\tesseract.exe" --ocr-languages pol+eng
+run\KKR.MailLens.exe processing-run
+```
+
+OCR przekazuje obraz przez pamięć i strumienie procesu, bez jawnego pliku tymczasowego. Skanowane PDF-y są obecnie oznaczane `needs-ocr`; automatyczne renderowanie ich stron nie jest jeszcze włączone.
 
 ## Lokalizacja danych
 

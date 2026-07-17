@@ -51,6 +51,10 @@ static class FileTypeDetector
     static string? DetectSignature(byte[] content)
     {
         if (content.AsSpan().StartsWith("%PDF-"u8)) return "application/pdf";
+        if (content.AsSpan().StartsWith(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A })) return "image/png";
+        if (content.AsSpan().StartsWith(new byte[] { 0xFF, 0xD8, 0xFF })) return "image/jpeg";
+        if (content.AsSpan().StartsWith("II*\0"u8) || content.AsSpan().StartsWith("MM\0*"u8)) return "image/tiff";
+        if (content.AsSpan().StartsWith("BM"u8)) return "image/bmp";
         if (!content.AsSpan().StartsWith("PK\x03\x04"u8)) return null;
 
         try
