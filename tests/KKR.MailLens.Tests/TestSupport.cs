@@ -55,6 +55,7 @@ sealed class FakeGmailApiClient : IGmailApiClient
         new("Label_Test", "Test Label", "user"),
     ];
     public ConcurrentDictionary<string, GmailApiMessage> Messages { get; } = new(StringComparer.Ordinal);
+    public ConcurrentDictionary<string, byte[]> AttachmentBytes { get; } = new(StringComparer.Ordinal);
     public ConcurrentDictionary<string, Exception> MessageErrors { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, Func<GmailMessagePage>> MessagePages { get; } = new(StringComparer.Ordinal);
     public Queue<Func<GmailHistoryPage>> HistoryPages { get; } = new();
@@ -80,6 +81,12 @@ sealed class FakeGmailApiClient : IGmailApiClient
         cancellationToken.ThrowIfCancellationRequested();
         if (MessageErrors.TryGetValue(messageId, out var error)) throw error;
         return Task.FromResult(Messages[messageId]);
+    }
+
+    public Task<byte[]> GetAttachmentBytesAsync(string messageId, string attachmentId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(AttachmentBytes[$"{messageId}\n{attachmentId}"]);
     }
 
     public Task<GmailHistoryPage> ListHistoryAsync(string startHistoryId, string? pageToken, CancellationToken cancellationToken)

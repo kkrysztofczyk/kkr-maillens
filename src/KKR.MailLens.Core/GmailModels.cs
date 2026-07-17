@@ -107,6 +107,7 @@ interface IGmailApiClient : IDisposable
     Task<IReadOnlyList<GmailApiLabel>> GetLabelsAsync(CancellationToken cancellationToken);
     Task<GmailMessagePage> ListMessageIdsAsync(string? pageToken, CancellationToken cancellationToken);
     Task<GmailApiMessage> GetMessageAsync(string messageId, CancellationToken cancellationToken);
+    Task<byte[]> GetAttachmentBytesAsync(string messageId, string attachmentId, CancellationToken cancellationToken);
     Task<GmailHistoryPage> ListHistoryAsync(string startHistoryId, string? pageToken, CancellationToken cancellationToken);
 }
 

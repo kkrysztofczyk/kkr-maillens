@@ -109,6 +109,16 @@ sealed class GoogleGmailApiClient : IGmailApiClient
         }
     }
 
+    public async Task<byte[]> GetAttachmentBytesAsync(string messageId, string attachmentId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(messageId) || string.IsNullOrWhiteSpace(attachmentId))
+            throw new ArgumentException("Brak identyfikatora wiadomości lub załącznika Gmail.");
+        var request = _service.Users.Messages.Attachments.Get("me", messageId, attachmentId);
+        MessagePartBody body = await Retry(() => request.ExecuteAsync(cancellationToken), cancellationToken).ConfigureAwait(false);
+        return GmailAttachmentDownloader.DecodeBase64Url(body.Data);
+    }
+
     async Task<GmailApiPart> MapPart(string messageId, MessagePart part, CancellationToken cancellationToken)
     {
         string? data = part.Body?.Data;
