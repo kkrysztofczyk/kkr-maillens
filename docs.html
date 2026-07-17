@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="author" content="Krzysztof Krysztofczyk">
   <title>KKR MailLens — dokumentacja</title>
   <style>
     :root { --bg:#f7f8fa; --card:#fff; --ink:#1b2230; --muted:#5b6472; --accent:#6317cd; --line:#e6e8ee; --code:#f0f1f5; }
@@ -24,22 +25,22 @@
 <main>
   <header>
     <h1>KKR MailLens</h1>
-    <div class="tag">Lokalny, szyfrowany indeks poczty z wyszukiwaniem SQLCipher + FTS5.</div>
+    <div class="tag">Lokalny, szyfrowany indeks poczty i załączników z wyszukiwaniem FTS5.</div>
   </header>
 
   <section>
     <h2>Opis</h2>
-    <p>Aplikacja importuje pocztę ze źródła desktopowego obsługiwanego przez COM, z serwera IMAP albo przez Gmail API. Wiadomości trafiają do lokalnej, zaszyfrowanej bazy SQLite. Klucz aktywnej sesji istnieje wyłącznie w RAM procesu GUI.</p>
+    <p>Aplikacja importuje pocztę z integracji desktopowej, IMAP lub Gmail API. Wiadomości trafiają do lokalnej bazy SQLCipher. Klucz aktywnej sesji istnieje wyłącznie w RAM procesu GUI.</p>
   </section>
 
   <section>
     <h2>Szybki start</h2>
     <ol>
       <li>Uruchom <code>run\KKR.MailLens.Gui.exe</code>.</li>
-      <li>Ustaw PIN i zainicjuj bazę.</li>
-      <li>Odblokuj sesję.</li>
-      <li>Uruchom import przyciskiem <b>Harvest</b>.</li>
-      <li>Wyszukuj w GUI lub przez <code>run\KKR.MailLens.exe query "neutralny tekst"</code>.</li>
+      <li>Ustaw PIN, zainicjuj bazę i odblokuj sesję.</li>
+      <li>Połącz źródło poczty i uruchom import.</li>
+      <li>Uruchom Worker poleceniem <code>run\KKR.MailLens.exe processing-run</code>.</li>
+      <li>Wyszukuj wiadomości przez <code>query</code>, a załączniki przez <code>query-content</code>.</li>
     </ol>
   </section>
 
@@ -55,24 +56,21 @@
   </section>
 
   <section>
-    <h2>IMAP</h2>
-    <p>Dane w przykładzie używają zarezerwowanej domeny <code>.invalid</code> i należy je zastąpić własną konfiguracją.</p>
-    <pre>run\KKR.MailLens.exe imap-add --host imap.example.invalid --user sender@example.invalid
-run\KKR.MailLens.exe imap-harvest --account sender@example.invalid --since 2026-01-01</pre>
-  </section>
-
-  <section>
-    <h2>Gmail API</h2>
-    <p>Połączenie korzysta z OAuth 2.0 dla aplikacji desktopowej i zakresu tylko do odczytu. Hasło do Gmaila nie trafia do aplikacji, a refresh token jest przechowywany lokalnie przez Windows DPAPI.</p>
+    <h2>Gmail i kolejka</h2>
     <pre>run\KKR.MailLens.exe account add gmail
 run\KKR.MailLens.exe gmail sync
-run\KKR.MailLens.exe gmail status</pre>
-    <p>Konfigurację klienta OAuth należy przechowywać poza repozytorium w <code>%LOCALAPPDATA%\kkr-maillens\gmail-oauth-client.json</code> albo wskazać zmienną <code>KKR_MAILLENS_GMAIL_OAUTH_CONFIG</code>. Pełny import można wznowić, a kolejne synchronizacje używają historii zmian.</p>
+run\KKR.MailLens.exe processing-status
+run\KKR.MailLens.exe processing-run
+run\KKR.MailLens.exe query-content "neutralny tekst"</pre>
+    <p>OAuth używa zakresu tylko do odczytu. Refresh token jest chroniony przez Windows DPAPI, a konfiguracja klienta OAuth pozostaje poza repozytorium.</p>
   </section>
 
   <section>
-    <h2>Dane i bezpieczeństwo</h2>
-    <p>Domyślny katalog to <code>%LOCALAPPDATA%\kkr-maillens</code>; zmienna <code>KKR_MAILLENS_DIR</code> pozwala wskazać inną lokalizację. SQLCipher, indeks FTS5 i idempotentny upsert pozostają częścią przepływu. Tokeny OAuth nie są zapisywane w logach ani w jawnej postaci.</p>
+    <h2>Załączniki i OCR</h2>
+    <p>Załączniki są deduplikowane i szyfrowane AES-GCM. Worker obsługuje TXT/HTML/PDF/DOCX/XLSX/PPTX. OCR obrazów PNG/JPEG/TIFF/BMP uruchamia lokalny Tesseract przez strumienie pamięci, bez jawnego pliku tymczasowego.</p>
+    <pre>run\KKR.MailLens.exe config --tesseract "C:\Program Files\Tesseract-OCR\tesseract.exe" --ocr-languages pol+eng
+run\KKR.MailLens.exe rebuild-content-index</pre>
+    <p>Skanowane PDF-y są oznaczane jako <code>needs-ocr</code>; automatyczne renderowanie ich stron nie jest jeszcze włączone.</p>
   </section>
 
   <section>
@@ -80,8 +78,9 @@ run\KKR.MailLens.exe gmail status</pre>
     <pre>dotnet build KKR.MailLens.sln
 dotnet test KKR.MailLens.sln
 dotnet run --project src\KKR.MailLens\KKR.MailLens.csproj -- selftest
-dotnet publish src\KKR.MailLens\KKR.MailLens.csproj -c Release -o run -p:DebugType=None -p:DebugSymbols=false
-dotnet publish src\KKR.MailLens.Gui\KKR.MailLens.Gui.csproj -c Release -o run -p:DebugType=None -p:DebugSymbols=false</pre>
+dotnet publish src\KKR.MailLens\KKR.MailLens.csproj -c Release -o run
+dotnet publish src\KKR.MailLens.Gui\KKR.MailLens.Gui.csproj -c Release -o run
+dotnet publish src\KKR.MailLens.Worker\KKR.MailLens.Worker.csproj -c Release -o run</pre>
   </section>
 </main>
 </body>
