@@ -366,6 +366,46 @@ static class Cli
         return 0;
     }
 
+    public static int ProcessingStatus()
+    {
+        string? key = RequireKey(); if (key is null) return 2;
+        using var connection = Db.Open(key, create: false);
+        Db.EnsureSchema(connection);
+        IReadOnlyDictionary<string, long> counts = ProcessingJobRepository.Counts(connection);
+        foreach (string status in new[] { "pending", "running", "completed", "failed" })
+            Console.WriteLine($"{status,-10}: {counts.GetValueOrDefault(status)}");
+        return 0;
+    }
+
+    public static int ProcessingRetry()
+    {
+        string? key = RequireKey(); if (key is null) return 2;
+        using var connection = Db.Open(key, create: false);
+        Db.EnsureSchema(connection);
+        Console.WriteLine($"Przywrócono do kolejki: {ProcessingJobRepository.RetryFailed(connection)}");
+        return 0;
+    }
+
+    public static int ProcessingRun(string[] args)
+    {
+        if (RequireKey() is null) return 2;
+        string executable = Path.Combine(AppContext.BaseDirectory, "KKR.MailLens.Worker.exe");
+        if (!File.Exists(executable))
+        {
+            Console.Error.WriteLine($"Brak workera: {executable}. Opublikuj projekt KKR.MailLens.Worker do tego samego katalogu.");
+            return 1;
+        }
+        var start = new System.Diagnostics.ProcessStartInfo(executable)
+        {
+            UseShellExecute = false,
+            Arguments = Flag(args, "--once") ? "" : "--drain",
+        };
+        using var process = System.Diagnostics.Process.Start(start);
+        if (process is null) return 1;
+        process.WaitForExit();
+        return process.ExitCode;
+    }
+
     static int AccountHelp()
     {
         Console.WriteLine("Uzycie: account add gmail | account list | account remove <id|adres>");
@@ -460,6 +500,9 @@ static class Cli
               gmail sync [--account A] [--full]     pelna lub przyrostowa synchronizacja Gmail API
               gmail status [--account A]            stan importu, liczby i bledy synchronizacji
               gmail cancel                         anuluj dzialajaca synchronizacje
+              processing-status                    pokaz stan trwalej kolejki zalacznikow
+              processing-run [--once]              uruchom osobny proces Worker
+              processing-retry                     ponow zadania zakonczone statusem failed
               selftest                             dowod: SQLCipher szyfruje, zly klucz odrzucony, FTS dziala
 
             Odblokowujesz w GUI (PIN + YubiKey). Klucz zyje tylko w RAM GUI. Bez tego korpus to szyfrogram.

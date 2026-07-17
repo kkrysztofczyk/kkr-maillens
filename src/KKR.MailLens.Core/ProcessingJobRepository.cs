@@ -9,6 +9,28 @@ sealed record ProcessingJob(long Id, string JobType, long? AttachmentId, long? D
 
 static class ProcessingJobRepository
 {
+    public static IReadOnlyDictionary<string, long> Counts(SqliteConnection connection)
+    {
+        var result = new Dictionary<string, long>(StringComparer.Ordinal);
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT status,count(*) FROM processing_jobs GROUP BY status;";
+        using var reader = command.ExecuteReader();
+        while (reader.Read()) result[reader.GetString(0)] = reader.GetInt64(1);
+        return result;
+    }
+
+    public static int RetryFailed(SqliteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE processing_jobs SET status='pending',attempts=0,available_at=$now,
+                locked_by=NULL,locked_at=NULL,lease_until=NULL,completed_at=NULL
+            WHERE status='failed';
+            """;
+        command.Parameters.AddWithValue("$now", Stamp(DateTimeOffset.UtcNow));
+        return command.ExecuteNonQuery();
+    }
+
     public static bool Enqueue(SqliteConnection connection, string jobType, long? attachmentId,
         long? documentId = null, int priority = 100, int maxAttempts = 3, DateTimeOffset? availableAt = null)
     {

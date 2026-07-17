@@ -24,6 +24,9 @@ return cmd switch
     "imap-harvest" => Cli.ImapHarvest(args),
     "account" => Cli.Account(args),
     "gmail" => Cli.Gmail(args),
+    "processing-status" => Cli.ProcessingStatus(),
+    "processing-run" => Cli.ProcessingRun(args),
+    "processing-retry" => Cli.ProcessingRetry(),
     "yubi-test" => Cli.YubiTest(),
     _ => Cli.Help(),
 };

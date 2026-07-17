@@ -27,6 +27,8 @@ Włącz Gmail API i utwórz klienta OAuth typu Desktop app. Plik konfiguracji za
 run\KKR.MailLens.exe account add gmail
 run\KKR.MailLens.exe gmail sync
 run\KKR.MailLens.exe gmail status
+run\KKR.MailLens.exe processing-status
+run\KKR.MailLens.exe processing-run
 ```
 
 Logowanie otwiera się w systemowej przeglądarce. Aplikacja nie pobiera hasła; refresh token jest chroniony przez Windows DPAPI. `gmail sync --full` wymusza pełną synchronizację, a `gmail cancel` zatrzymuje trwającą operację.
@@ -53,4 +55,5 @@ dotnet test KKR.MailLens.sln
 dotnet run --project src\KKR.MailLens\KKR.MailLens.csproj -- selftest
 dotnet publish src\KKR.MailLens\KKR.MailLens.csproj -c Release -o run -p:DebugType=None -p:DebugSymbols=false
 dotnet publish src\KKR.MailLens.Gui\KKR.MailLens.Gui.csproj -c Release -o run -p:DebugType=None -p:DebugSymbols=false
+dotnet publish src\KKR.MailLens.Worker\KKR.MailLens.Worker.csproj -c Release -o run -p:DebugType=None -p:DebugSymbols=false
 ```

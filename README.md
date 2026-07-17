@@ -16,6 +16,7 @@ dotnet build KKR.MailLens.sln
 dotnet test KKR.MailLens.sln
 dotnet publish src\KKR.MailLens\KKR.MailLens.csproj -c Release -o run -p:DebugType=None -p:DebugSymbols=false
 dotnet publish src\KKR.MailLens.Gui\KKR.MailLens.Gui.csproj -c Release -o run -p:DebugType=None -p:DebugSymbols=false
+dotnet publish src\KKR.MailLens.Worker\KKR.MailLens.Worker.csproj -c Release -o run -p:DebugType=None -p:DebugSymbols=false
 ```
 
 Solution składa się z biblioteki `src\KKR.MailLens.Core`, aplikacji CLI `src\KKR.MailLens` oraz aplikacji WinForms `src\KKR.MailLens.Gui`. CLI i GUI korzystają z tego samego rdzenia przez `ProjectReference`; nie linkują ręcznie plików źródłowych. Assembly wykonywalne nazywają się odpowiednio `KKR.MailLens` i `KKR.MailLens.Gui`.
@@ -56,6 +57,8 @@ run\KKR.MailLens.exe account add gmail
 run\KKR.MailLens.exe account list
 run\KKR.MailLens.exe gmail sync
 run\KKR.MailLens.exe gmail status
+run\KKR.MailLens.exe processing-status
+run\KKR.MailLens.exe processing-run
 ```
 
 Pełną kontrolowaną synchronizację wymusza `gmail sync --full`. Działającą synchronizację można zatrzymać z drugiego terminala poleceniem `gmail cancel`. Przy wielu kontach służy parametr `--account <id|adres>`.
