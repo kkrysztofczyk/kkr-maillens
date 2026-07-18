@@ -15,6 +15,7 @@ TimeSpan leaseDuration = TimeSpan.FromMinutes(5);
 using var connection = Db.Open(key, create: false);
 Db.EnsureSchema(connection);
 var store = new EncryptedBlobStore(Paths.BlobsDir, key);
+using var outlookBroker = new OutlookAttachmentBroker();
 using var shutdown = new CancellationTokenSource();
 int sessionLocked = 0;
 ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
@@ -38,7 +39,7 @@ try
             switch (job.JobType)
             {
                 case "download":
-                    await DownloadAsync(connection, store, job, key, shutdown.Token);
+                    await DownloadAsync(connection, store, outlookBroker, job, key, shutdown.Token);
                     break;
                 case "extract":
                     if (job.AttachmentId is null || job.DocumentId is null)
@@ -146,7 +147,8 @@ finally
 }
 
 static async Task DownloadAsync(Microsoft.Data.Sqlite.SqliteConnection connection, EncryptedBlobStore store,
-    ProcessingJob job, string sessionKeyHex, CancellationToken cancellationToken)
+    OutlookAttachmentBroker outlookBroker, ProcessingJob job, string sessionKeyHex,
+    CancellationToken cancellationToken)
 {
     if (job.AttachmentId is null) throw new InvalidDataException("Zadanie pobierania nie wskazuje załącznika.");
     MailAttachmentRepository.Item item = MailAttachmentRepository.Get(connection, job.AttachmentId.Value);
@@ -154,6 +156,7 @@ static async Task DownloadAsync(Microsoft.Data.Sqlite.SqliteConnection connectio
     {
         "gmail" => await DownloadGmailAsync(connection, item, sessionKeyHex, cancellationToken),
         "imap" => await DownloadImapAsync(item, sessionKeyHex, cancellationToken),
+        "outlook" => outlookBroker.Download(item, cancellationToken: cancellationToken),
         _ => throw new NotSupportedException($"Nieobsługiwany provider: {item.Provider}"),
     };
     try

@@ -43,7 +43,8 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - GUI ma panel kont Gmail z OAuth, synchronizacją pełną/przyrostową, anulowaniem, statusem kolejki i uruchamianiem Workera.
 - Wyszukiwanie GUI przełącza się między wiadomościami, `content_fts` albo łączy oba rodzaje wyników.
 - IMAP zapisuje locator konto/folder/UIDVALIDITY/UID/część MIME, a Worker pobiera i przetwarza załącznik przez MailKit z limitem pamięci.
-- Zestaw testów wzrósł z historycznych 20/31 do 78 testów.
+- Outlook zapisuje StoreID/EntryID/indeks załącznika; broker COM działa na dedykowanym STA i sprząta izolowany plaintext workspace.
+- Zestaw testów wzrósł z historycznych 20/31 do 82 testów.
 
 ### Otwarte — priorytet
 
@@ -52,4 +53,4 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 ### Otwarte — roadmapa
 
 - Renderowanie stron PDF do OCR w batchach (dziś każdy `RenderAsync` parsuje dokument od nowa).
-- Załączniki Outlook oraz opcjonalne lokalne AI.
+- Opcjonalne lokalne AI i wyszukiwanie semantyczne.

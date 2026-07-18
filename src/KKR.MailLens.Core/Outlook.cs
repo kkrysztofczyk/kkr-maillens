@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using MimeKit;
 
 namespace KKR.MailLens;
 
@@ -65,13 +67,60 @@ sealed class Outlook : IDisposable
         }
         catch (Exception ex) { _startupError = ex; _ready.TrySetResult(true); return; }
 
-        foreach (var job in _queue.GetConsumingEnumerable())
+        try
         {
-            try { job(); } catch { }
+            foreach (var job in _queue.GetConsumingEnumerable())
+            {
+                try { job(); } catch { }
+            }
+        }
+        finally
+        {
+            if (_ns is object ns) Release(ns);
+            if (_app is object app) Release(app);
+            _ns = null;
+            _app = null;
         }
     }
 
-    public void Dispose() => _queue.CompleteAdding(); // nie Quit() - to instancja uzytkownika
+    public void Dispose()
+    {
+        if (!_queue.IsAddingCompleted) _queue.CompleteAdding();
+        if (Thread.CurrentThread != _sta) _sta.Join(TimeSpan.FromSeconds(10));
+    }
+
+    public void SaveAttachment(string storeId, string entryId, int attachmentIndex,
+        string destination, long maximumBytes)
+    {
+        if (string.IsNullOrWhiteSpace(storeId) || string.IsNullOrWhiteSpace(entryId))
+            throw new InvalidDataException("Brak identyfikatora wiadomości Outlook.");
+        if (attachmentIndex <= 0) throw new InvalidDataException("Nieprawidłowy indeks załącznika Outlook.");
+        if (maximumBytes <= 0) throw new ArgumentOutOfRangeException(nameof(maximumBytes));
+
+        Invoke(ns =>
+        {
+            dynamic? mail = null, attachments = null, attachment = null;
+            try
+            {
+                mail = ns.GetItemFromID(entryId, storeId);
+                attachments = mail.Attachments;
+                int count = (int)attachments.Count;
+                if (attachmentIndex > count) throw new InvalidDataException("Załącznik Outlook już nie istnieje.");
+                attachment = attachments[attachmentIndex];
+                long declaredSize = Int(() => (int)attachment.Size);
+                if (declaredSize > maximumBytes)
+                    throw new InvalidDataException("Załącznik przekracza dozwolony limit rozmiaru.");
+                attachment.SaveAsFile(destination);
+                return true;
+            }
+            finally
+            {
+                if (attachment is object a) Release(a);
+                if (attachments is object collection) Release(collection);
+                if (mail is object item) Release(item);
+            }
+        });
+    }
 
     // ---- zbieranie ----
 
@@ -232,9 +281,10 @@ sealed class Outlook : IDisposable
 
     static HarvestedMail Read(dynamic mail, string path, string leaf, string sid)
     {
+        string entryId = Str(() => (string)mail.EntryID);
         var m = new HarvestedMail
         {
-            EntryId = Str(() => (string)mail.EntryID),
+            EntryId = entryId,
             StoreId = sid,
             FolderPath = path,
             FolderLeaf = leaf,
@@ -248,6 +298,8 @@ sealed class Outlook : IDisposable
             Categories = Str(() => (string)mail.Categories),
             Unread = Bool(() => (bool)mail.UnRead),
             Size = Int(() => (int)mail.Size),
+            AttachmentProvider = "outlook",
+            ProviderMessageKey = new OutlookMessageLocator(sid, entryId).Encode(),
         };
         var to = new List<string>(); var cc = new List<string>();
         try
@@ -265,16 +317,37 @@ sealed class Outlook : IDisposable
         catch { }
         m.ToRecips = string.Join("; ", to);
         m.CcRecips = string.Join("; ", cc);
+        dynamic? atts = null;
         try
         {
-            dynamic atts = mail.Attachments;
+            atts = mail.Attachments;
             int an = (int)atts.Count;
             m.HasAttachments = an > 0;
             var names = new List<string>();
-            for (int i = 1; i <= an; i++) names.Add(Str(() => (string)atts[i].FileName));
+            var attachmentRows = new List<HarvestedAttachment>();
+            for (int i = 1; i <= an; i++)
+            {
+                dynamic? attachment = null;
+                try
+                {
+                    attachment = atts[i];
+                    string filename = Str(() => (string)attachment.FileName);
+                    if (filename.Length == 0) filename = $"attachment-{i}";
+                    long size = Int(() => (int)attachment.Size);
+                    string contentId = Str(() => (string)attachment.PropertyAccessor.GetProperty(PR_ATTACH_CONTENT_ID));
+                    bool isInline = Bool(() => (bool)attachment.PropertyAccessor.GetProperty(PR_ATTACHMENT_HIDDEN));
+                    string index = i.ToString(CultureInfo.InvariantCulture);
+                    names.Add(filename);
+                    attachmentRows.Add(new HarvestedAttachment(index, index, filename,
+                        MimeTypes.GetMimeType(filename), size, contentId, isInline));
+                }
+                finally { if (attachment is object value) Release(value); }
+            }
             m.AttachmentNames = string.Join("; ", names);
+            m.Attachments = attachmentRows;
         }
         catch { }
+        finally { if (atts is object collection) Release(collection); }
         return m;
     }
 
@@ -284,6 +357,8 @@ sealed class Outlook : IDisposable
     const string PR_SENTREP_SMTP = "http://schemas.microsoft.com/mapi/proptag/0x5D02001F";
     const string PR_SMTP_ADDRESS = "http://schemas.microsoft.com/mapi/proptag/0x39FE001F";
     const string PR_TRANSPORT_HEADERS = "http://schemas.microsoft.com/mapi/proptag/0x007D001F";
+    const string PR_ATTACH_CONTENT_ID = "http://schemas.microsoft.com/mapi/proptag/0x3712001F";
+    const string PR_ATTACHMENT_HIDDEN = "http://schemas.microsoft.com/mapi/proptag/0x7FFE000B";
 
     static bool IsMail(dynamic item)
     {

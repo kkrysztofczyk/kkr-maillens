@@ -10,6 +10,8 @@ KKR MailLens to lokalny, szyfrowany indeks poczty z wyszukiwaniem FTS5. Klucz ak
 4. Kliknij `Harvest`, aby pobrać pocztę ze źródła desktopowego.
 5. Użyj pola `Szukaj` i wybierz zakres `Wiadomości`, `Załączniki` albo `Wszystko`; alerty automatyczne są domyślnie odsiewane według lokalnych reguł.
 
+`Harvest` zapisuje także metadane załączników Outlook. Uruchom `run\KKR.MailLens.exe processing-run`, aby Worker pobrał je przez dedykowany wątek STA, zaszyfrował i zindeksował. Jawny plik wymagany przez API Outlooka jest usuwany z izolowanego katalogu roboczego przed zakończeniem zadania.
+
 ## IMAP
 
 Poniższe wartości są neutralnymi placeholderami z domeny `.invalid`:
