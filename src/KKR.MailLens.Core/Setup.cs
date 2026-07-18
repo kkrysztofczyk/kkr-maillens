@@ -54,6 +54,7 @@ static class Setup
         try
         {
             Session.Lock(); // sprzataj ewentualna stara sesje dyskowa
+            if (force) PurgeDataBoundToPreviousCorpus();
             Crypto.WriteSalt(salt);
             if (File.Exists(Paths.CorpusDb)) File.Delete(Paths.CorpusDb);
             File.Move(tmp, Paths.CorpusDb);
@@ -65,5 +66,25 @@ static class Setup
             return new("Nie moge zapisac nowego korpusu: " + ex.Message, null);
         }
         return new(null, keyHex);
+    }
+
+    static void PurgeDataBoundToPreviousCorpus()
+    {
+        DeleteFileIfExists(Paths.CorpusDb + "-wal");
+        DeleteFileIfExists(Paths.CorpusDb + "-shm");
+        DeleteFileIfExists(Paths.ImapAccountsFile);
+        DeleteFileIfExists(Paths.GmailCancelFile);
+        DeleteDirectoryIfExists(Paths.GmailTokensDir);
+        DeleteDirectoryIfExists(Paths.BlobsDir);
+    }
+
+    static void DeleteFileIfExists(string path)
+    {
+        if (File.Exists(path)) File.Delete(path);
+    }
+
+    static void DeleteDirectoryIfExists(string path)
+    {
+        if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
     }
 }

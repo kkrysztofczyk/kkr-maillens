@@ -33,7 +33,7 @@ run\KKR.MailLens.exe processing-status
 run\KKR.MailLens.exe processing-run
 ```
 
-Logowanie otwiera się w systemowej przeglądarce. Aplikacja nie pobiera hasła; refresh token jest chroniony przez Windows DPAPI. `gmail sync --full` wymusza pełną synchronizację, a `gmail cancel` zatrzymuje trwającą operację.
+Logowanie otwiera się w systemowej przeglądarce. Aplikacja nie pobiera hasła; refresh token jest szyfrowany kluczem aktywnej sesji i dodatkowo chroniony przez Windows DPAPI. Starsze tokeny są migrowane po odblokowaniu. `gmail sync --full` wymusza pełną synchronizację, a `gmail cancel` zatrzymuje trwającą operację.
 
 ## Wyszukiwanie z CLI
 

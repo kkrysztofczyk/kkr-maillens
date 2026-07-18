@@ -12,10 +12,11 @@ static class GmailOAuth
 {
     static readonly string[] Scopes = [GmailService.Scope.GmailReadonly];
 
-    public static async Task<GmailAccountRecord> ConnectAsync(SqliteConnection database, CancellationToken cancellationToken)
+    public static async Task<GmailAccountRecord> ConnectAsync(SqliteConnection database,
+        string sessionKeyHex, CancellationToken cancellationToken)
     {
         ClientSecrets secrets = GmailOAuthClientConfig.Load();
-        var store = new GmailTokenStore(Paths.GmailTokensDir);
+        using var store = new GmailTokenStore(Paths.GmailTokensDir, sessionKeyHex);
         string pendingKey = "pending-" + Guid.NewGuid().ToString("N");
 
         try
@@ -51,32 +52,46 @@ static class GmailOAuth
         }
     }
 
-    public static async Task<IGmailApiClient> CreateApiClientAsync(GmailAccountRecord account, CancellationToken cancellationToken)
+    public static async Task<IGmailApiClient> CreateApiClientAsync(GmailAccountRecord account,
+        string sessionKeyHex, CancellationToken cancellationToken)
     {
         ClientSecrets secrets = GmailOAuthClientConfig.Load();
-        var store = new GmailTokenStore(Paths.GmailTokensDir);
-        TokenResponse? token = await store.GetAsync<TokenResponse>(account.TokenKey).ConfigureAwait(false);
-        cancellationToken.ThrowIfCancellationRequested();
-        if (token is null || string.IsNullOrWhiteSpace(token.RefreshToken))
-            throw new GmailAuthorizationException();
+        var store = new GmailTokenStore(Paths.GmailTokensDir, sessionKeyHex);
+        GoogleAuthorizationCodeFlow? flow = null;
+        GmailService? service = null;
+        try
+        {
+            TokenResponse? token = await store.GetAsync<TokenResponse>(account.TokenKey).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (token is null || string.IsNullOrWhiteSpace(token.RefreshToken))
+                throw new GmailAuthorizationException();
 
-        var flow = new GoogleAuthorizationCodeFlow(new GoogleAuthorizationCodeFlow.Initializer
+            flow = new GoogleAuthorizationCodeFlow(new GoogleAuthorizationCodeFlow.Initializer
+            {
+                ClientSecrets = secrets,
+                DataStore = store,
+            });
+            var credential = new UserCredential(flow, account.TokenKey, token);
+            service = new GmailService(new BaseClientService.Initializer
+            {
+                HttpClientInitializer = credential,
+                ApplicationName = "KKR MailLens",
+            });
+            return new GoogleGmailApiClient(service, flow, store);
+        }
+        catch
         {
-            ClientSecrets = secrets,
-            DataStore = store,
-        });
-        var credential = new UserCredential(flow, account.TokenKey, token);
-        var service = new GmailService(new BaseClientService.Initializer
-        {
-            HttpClientInitializer = credential,
-            ApplicationName = "KKR MailLens",
-        });
-        return new GoogleGmailApiClient(service, flow);
+            service?.Dispose();
+            flow?.Dispose();
+            store.Dispose();
+            throw;
+        }
     }
 
-    public static async Task RemoveTokenAsync(string tokenKey, CancellationToken cancellationToken = default)
+    public static async Task RemoveTokenAsync(string tokenKey, string sessionKeyHex,
+        CancellationToken cancellationToken = default)
     {
-        var store = new GmailTokenStore(Paths.GmailTokensDir);
+        using var store = new GmailTokenStore(Paths.GmailTokensDir, sessionKeyHex);
         try
         {
             TokenResponse? token = await store.GetAsync<TokenResponse>(tokenKey).ConfigureAwait(false);

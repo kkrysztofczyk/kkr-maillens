@@ -26,11 +26,12 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Blob store zapisuje atomowo przy równoległej deduplikacji i używa AAD v2 obejmującego wersję formatu.
 - Odczyt istniejących blobów v1 pozostaje zgodny wstecz, a KDF korzysta z systemowego `HKDF`.
 - Ochrona przed path traversal blobów ma test regresyjny.
-- Zestaw testów wzrósł z historycznych 20/31 do 57 testów.
+- Tokeny Gmail i hasła IMAP są związane z kluczem aktywnej sesji przez AES-GCM, a następnie chronione przez DPAPI `CurrentUser`.
+- Starsze poświadczenia DPAPI-only są migrowane po odblokowaniu; ponowna inicjalizacja usuwa sekrety i bloby poprzedniego korpusu.
+- Zestaw testów wzrósł z historycznych 20/31 do 60 testów.
 
 ### Otwarte — priorytet
 
-- Powiązać ochronę tokenów Gmail i haseł IMAP z odblokowaną sesją; obecnie podstawową ochroną jest DPAPI `CurrentUser`.
 - Rozważyć jedną transakcję dla zapisu wiadomości, korpusu, metadanych załączników i enqueue strony synchronizacji.
 - Utwardzić Worker przetwarzający niezaufane dokumenty: limity zasobów i uprawnień oraz testy złośliwych PDF/OOXML.
 - Enqueue `download` tylko dla załączników `metadata-only` — obecnie każdy upsert ponawia pobieranie i re-ekstrakcję już przetworzonych załączników.

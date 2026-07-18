@@ -14,12 +14,12 @@ namespace KKR.MailLens;
 /// </summary>
 static class Imap
 {
-    public static int Harvest(ImapAccount acct, DateTime? from, int maxPerFolder,
+    public static int Harvest(ImapAccount acct, string sessionKeyHex, DateTime? from, int maxPerFolder,
         Action<string> onFolder, Action<int, int>? onProgress, Action<List<HarvestedMail>> flush, int batchSize = 500)
     {
         using var client = new ImapClient();
         client.Connect(acct.Host, acct.Port, acct.UseSsl ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTls);
-        client.Authenticate(acct.User, acct.GetPassword());
+        client.Authenticate(acct.User, acct.GetPassword(sessionKeyHex));
 
         // foldery-cele (Inbox + reszta z personal namespace), pomijajac systemowe/dublujace
         var targets = new List<IMailFolder>();

@@ -106,9 +106,9 @@ Domyślny katalog danych to `%LOCALAPPDATA%\kkr-maillens`. Lokalizację można z
 
 Baza pozostaje szyfrowana przez SQLCipher. Klucz jest wyprowadzany z PIN-u i opcjonalnego drugiego składnika, a następnie przechowywany wyłącznie w RAM działającego GUI. Import jest idempotentny, SQLite zachowuje dotychczasowy schemat danych, a wyszukiwanie nadal korzysta z FTS5.
 
-Refresh tokeny Gmaila są przechowywane poza bazą w plikach chronionych przez Windows DPAPI dla bieżącego użytkownika. Tokeny nie są wypisywane w logach. Pliki klienta OAuth są ignorowane przez Git i nie wolno ich commitować. Treść wiadomości pozostaje lokalna; aplikacja komunikuje się wyłącznie z wybranym źródłem poczty.
+Refresh tokeny Gmaila i hasła IMAP są szyfrowane AES-GCM kluczem wyprowadzonym z aktywnej sesji, a zewnętrzna warstwa pliku jest dodatkowo chroniona przez Windows DPAPI `CurrentUser`. Starsze dane chronione wyłącznie DPAPI są automatycznie migrowane po poprawnym odblokowaniu. Tokeny nie są wypisywane w logach. Pliki klienta OAuth są ignorowane przez Git i nie wolno ich commitować. Treść wiadomości pozostaje lokalna; aplikacja komunikuje się wyłącznie z wybranym źródłem poczty.
 
-Model chroni przede wszystkim dane w spoczynku, na przykład przy utracie wyłączonego komputera lub nośnika. Nie chroni przed złośliwym kodem uruchomionym jako ten sam użytkownik Windows podczas odblokowanej sesji: lokalny proces tego użytkownika może komunikować się z named pipe GUI, a DPAPI `CurrentUser` nie wymaga PIN-u KKR MailLens. Powiązanie tokenów i haseł źródeł z kluczem aktywnej sesji pozostaje otwartym zadaniem bezpieczeństwa.
+Model chroni przede wszystkim dane w spoczynku, na przykład przy utracie wyłączonego komputera lub nośnika. Nie chroni przed złośliwym kodem uruchomionym jako ten sam użytkownik Windows podczas odblokowanej sesji: lokalny proces tego użytkownika może komunikować się z named pipe GUI i uzyskać dostęp do operacji wykonywanych przez odblokowaną aplikację. Ponowna inicjalizacja z `force` usuwa tokeny, hasła źródeł i bloby związane z poprzednim kluczem korpusu.
 
 Historyczne raporty i aktualny status ich ustaleń są dostępne w [`docs/audits`](docs/audits/README.md).
 

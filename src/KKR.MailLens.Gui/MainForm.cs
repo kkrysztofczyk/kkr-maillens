@@ -377,6 +377,15 @@ sealed class MainForm : Form
             RamSession.Set(key!, TimeSpan.FromHours(ttl)); // klucz w RAM
             Session.Lock(); // dysk czysty
             Log($"Odblokowano [{(wantYubi ? "PIN + YubiKey" : "PIN")}], klucz w RAM na {ttl}h.");
+            try
+            {
+                SessionCredentialMigrationResult migration = await SessionCredentialMigration.RunAsync(key!);
+                if (migration.GmailTokens + migration.ImapPasswords > 0)
+                    Log($"Zmigrowano poświadczenia do ochrony sesyjnej: Gmail={migration.GmailTokens}, IMAP={migration.ImapPasswords}.");
+                if (migration.Failures > 0)
+                    Log($"UWAGA: nie udało się zmigrować poświadczeń: {migration.Failures}. Połącz konto ponownie.");
+            }
+            catch (Exception ex) { Log("UWAGA: migracja poświadczeń nieudana: " + ex.GetType().Name); }
         }
         finally { SetBusy(false); RefreshStatus(); }
     }

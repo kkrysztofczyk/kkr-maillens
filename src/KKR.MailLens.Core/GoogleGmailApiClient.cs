@@ -11,11 +11,14 @@ sealed class GoogleGmailApiClient : IGmailApiClient
 {
     readonly GmailService _service;
     readonly IDisposable _authorizationFlow;
+    readonly IDisposable _tokenStore;
 
-    public GoogleGmailApiClient(GmailService service, IDisposable authorizationFlow)
+    public GoogleGmailApiClient(GmailService service, IDisposable authorizationFlow,
+        IDisposable tokenStore)
     {
         _service = service;
         _authorizationFlow = authorizationFlow;
+        _tokenStore = tokenStore;
     }
 
     public async Task<GmailProfile> GetProfileAsync(CancellationToken cancellationToken)
@@ -187,7 +190,11 @@ sealed class GoogleGmailApiClient : IGmailApiClient
 
     public void Dispose()
     {
-        _service.Dispose();
-        _authorizationFlow.Dispose();
+        try { _service.Dispose(); }
+        finally
+        {
+            try { _authorizationFlow.Dispose(); }
+            finally { _tokenStore.Dispose(); }
+        }
     }
 }

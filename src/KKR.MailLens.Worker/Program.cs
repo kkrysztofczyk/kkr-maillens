@@ -26,7 +26,7 @@ do
         switch (job.JobType)
         {
             case "download":
-                await DownloadAsync(connection, store, job);
+                await DownloadAsync(connection, store, job, key);
                 break;
             case "extract":
                 if (job.AttachmentId is null || job.DocumentId is null)
@@ -89,7 +89,7 @@ while (drain);
 return 0;
 
 static async Task DownloadAsync(Microsoft.Data.Sqlite.SqliteConnection connection, EncryptedBlobStore store,
-    ProcessingJob job)
+    ProcessingJob job, string sessionKeyHex)
 {
     if (job.AttachmentId is null) throw new InvalidDataException("Zadanie pobierania nie wskazuje załącznika.");
     MailAttachmentRepository.Item item = MailAttachmentRepository.Get(connection, job.AttachmentId.Value);
@@ -97,7 +97,8 @@ static async Task DownloadAsync(Microsoft.Data.Sqlite.SqliteConnection connectio
     long accountId = ParseGmailAccountId(item.MailEntryId);
     GmailAccountRecord account = GmailRepository.FindAccount(connection, accountId)
         ?? throw new InvalidOperationException("Konto Gmail nie istnieje.");
-    using IGmailApiClient api = await GmailOAuth.CreateApiClientAsync(account, CancellationToken.None);
+    using IGmailApiClient api = await GmailOAuth.CreateApiClientAsync(
+        account, sessionKeyHex, CancellationToken.None);
     var attachment = new GmailAttachmentRecord(item.PartId,
         item.ProviderAttachmentKey.StartsWith("part:", StringComparison.Ordinal) ? "" : item.ProviderAttachmentKey,
         item.InlineBase64Data, item.Filename, item.MimeType, item.SizeBytes, item.ContentId, item.IsInline);

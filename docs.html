@@ -67,7 +67,7 @@ run\KKR.MailLens.exe gmail sync
 run\KKR.MailLens.exe processing-status
 run\KKR.MailLens.exe processing-run
 run\KKR.MailLens.exe query-content "neutralny tekst"</pre>
-    <p>OAuth używa zakresu tylko do odczytu. Refresh token jest chroniony przez Windows DPAPI, a konfiguracja klienta OAuth pozostaje poza repozytorium.</p>
+    <p>OAuth używa zakresu tylko do odczytu. Refresh token jest szyfrowany kluczem aktywnej sesji i dodatkowo chroniony przez Windows DPAPI, a konfiguracja klienta OAuth pozostaje poza repozytorium.</p>
   </section>
 
   <section>
@@ -80,7 +80,7 @@ run\KKR.MailLens.exe rebuild-content-index</pre>
 
   <section>
     <h2>Model bezpieczeństwa i audyty</h2>
-    <p>SQLCipher i AES-GCM chronią dane w spoczynku. Projekt nie chroni przed złośliwym procesem działającym jako ten sam użytkownik Windows podczas odblokowanej sesji. Tokeny OAuth są obecnie chronione przez DPAPI <code>CurrentUser</code>; powiązanie ich z kluczem sesji pozostaje otwartym zadaniem.</p>
+    <p>SQLCipher i AES-GCM chronią dane w spoczynku. Tokeny OAuth oraz hasła IMAP są związane z kluczem aktywnej sesji przez AES-GCM i dodatkowo chronione przez DPAPI <code>CurrentUser</code>; starsze dane DPAPI-only są migrowane po odblokowaniu. Projekt nie chroni przed złośliwym procesem działającym jako ten sam użytkownik Windows podczas odblokowanej sesji.</p>
     <p>Historyczne raporty oraz aktualny status ustaleń znajdują się w <a href="docs/audits/README.md"><code>docs/audits</code></a>.</p>
   </section>
 

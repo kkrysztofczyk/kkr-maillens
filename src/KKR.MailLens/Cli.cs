@@ -185,6 +185,7 @@ static class Cli
 
     public static int ImapAdd(string[] args)
     {
+        string? key = RequireKey(); if (key is null) return 2;
         var accts = ImapAccounts.Load();
         var a = new ImapAccount();
         a.Host = GetStr(args, "--host") ?? a.Host;
@@ -199,12 +200,12 @@ static class Cli
         string? pass = GetStr(args, "--pass");
         if (string.IsNullOrEmpty(pass)) pass = PromptMasked($"Haslo / App-Password dla {a.User}: ");
         if (string.IsNullOrEmpty(pass)) { Console.Error.WriteLine("Brak hasla."); return 1; }
-        a.SetPassword(pass);
+        a.SetPassword(pass, key);
 
         accts.Accounts.RemoveAll(x => string.Equals(x.Name, a.Name, StringComparison.OrdinalIgnoreCase));
         accts.Accounts.Add(a);
         accts.Save();
-        Console.WriteLine($"Zapisano konto IMAP '{a.Name}' ({a.User}@{a.Host}:{a.Port}, ssl={a.UseSsl}). Haslo owiniete DPAPI.");
+        Console.WriteLine($"Zapisano konto IMAP '{a.Name}' ({a.User}@{a.Host}:{a.Port}, ssl={a.UseSsl}). Hasło chronione aktywną sesją i DPAPI.");
         return 0;
     }
 
@@ -222,6 +223,13 @@ static class Cli
     {
         string? key = RequireKey(); if (key is null) return 2;
         var accts = ImapAccounts.Load();
+        try { accts.MigrateCredentials(key); }
+        catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException
+            or InvalidDataException or FormatException)
+        {
+            Console.Error.WriteLine("Nie można odszyfrować hasła IMAP dla aktywnej sesji.");
+            return 1;
+        }
         string? name = GetStr(args, "--account");
         var chosen = new List<ImapAccount>();
         if (name != null) { var a = accts.Find(name); if (a != null) chosen.Add(a); }
@@ -240,7 +248,7 @@ static class Cli
             Console.WriteLine($"IMAP '{a.Name}' ({a.User}@{a.Host}): since={(since?.ToString("yyyy-MM-dd") ?? "(brak)")}, max/folder={max}");
             try
             {
-                int n = Imap.Harvest(a, since, max,
+                int n = Imap.Harvest(a, key, since, max,
                     f => Console.WriteLine($"  folder: {f}"),
                     (done, total) => Console.WriteLine($"    ...{(total > 0 ? done * 100 / total : 0)}% ({done}/{total})"),
                     batch => { var st = Corpus.Upsert(c, batch, stamp); ins += st.Inserted; upd += st.Updated; });
@@ -287,8 +295,8 @@ static class Cli
             using var c = Db.Open(key, create: false);
             Db.EnsureSchema(c);
             Console.WriteLine("Otwieram systemowa przegladarke do logowania OAuth. Haslo do Gmaila nie trafia do aplikacji.");
-            GmailAccountRecord account = await GmailOAuth.ConnectAsync(c, cancellationToken).ConfigureAwait(false);
-            Console.WriteLine($"Polaczono konto: {account.Email}. Refresh token zapisano lokalnie przez DPAPI.");
+            GmailAccountRecord account = await GmailOAuth.ConnectAsync(c, key, cancellationToken).ConfigureAwait(false);
+            Console.WriteLine($"Połączono konto: {account.Email}. Refresh token chroni aktywna sesja i DPAPI.");
             return 0;
         });
     }
@@ -314,7 +322,7 @@ static class Cli
         Db.EnsureSchema(c);
         GmailAccountRecord? account = GmailRepository.FindAccount(c, selector);
         if (account is null) { Console.Error.WriteLine("Nie znaleziono konta."); return 1; }
-        GmailOAuth.RemoveTokenAsync(account.TokenKey).GetAwaiter().GetResult();
+        GmailOAuth.RemoveTokenAsync(account.TokenKey, key).GetAwaiter().GetResult();
         GmailRepository.DeleteAccount(c, account.Id);
         Console.WriteLine($"Odlaczono konto {account.Email}; lokalny token i dane synchronizacji zostaly usuniete.");
         return 0;
@@ -346,7 +354,7 @@ static class Cli
                     Console.WriteLine($"Gmail sync: {account.Email} ({(full ? "pelna" : "automatyczna")}).");
                     try
                     {
-                        using IGmailApiClient api = await GmailOAuth.CreateApiClientAsync(account, cancellationToken).ConfigureAwait(false);
+                        using IGmailApiClient api = await GmailOAuth.CreateApiClientAsync(account, key, cancellationToken).ConfigureAwait(false);
                         var progress = new InlineProgress<GmailSyncProgress>(p =>
                             Console.WriteLine($"  {p.Phase}: przetworzono={p.Processed}, bledy={p.Errors}"));
                         var synchronizer = new GmailSynchronizer(c, api, progress);
