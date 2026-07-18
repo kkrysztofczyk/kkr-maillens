@@ -1,4 +1,5 @@
 using System.Text;
+using System.IO.Compression;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace KKR.MailLens.Tests;
@@ -70,5 +71,34 @@ public sealed class ContentExtractionTests
 
         Assert.ThrowsExactly<NotSupportedException>(() =>
             dispatcher.Extract("record.bin", "application/octet-stream", [0, 1, 2, 3]));
+    }
+
+    [TestMethod]
+    public void Extract_PdfBeyondConfiguredByteLimit_IsRejectedBeforeParsing()
+    {
+        var dispatcher = new ContentExtractionDispatcher(options: new TextExtractionOptions(MaxBytes: 8));
+
+        Assert.ThrowsExactly<InvalidDataException>(() =>
+            dispatcher.Extract("record.pdf", "application/pdf", Encoding.ASCII.GetBytes("%PDF-1.4 neutral")));
+    }
+
+    [TestMethod]
+    public void Extract_OpenXmlBeyondExpandedLimit_IsRejectedBeforePackageParsing()
+    {
+        byte[] archive;
+        using (var stream = new MemoryStream())
+        {
+            using (var zip = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                using var writer = new StreamWriter(zip.CreateEntry("word/document.xml").Open(), Encoding.UTF8);
+                writer.Write(new string('A', 2_048));
+            }
+            archive = stream.ToArray();
+        }
+        var dispatcher = new ContentExtractionDispatcher(options:
+            new TextExtractionOptions(MaxArchiveExpandedBytes: 1_024));
+
+        Assert.ThrowsExactly<InvalidDataException>(() =>
+            dispatcher.Extract("record.docx", "application/octet-stream", archive));
     }
 }

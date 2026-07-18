@@ -43,6 +43,40 @@ public sealed class AttachmentExtractionProcessorTests
         }
     }
 
+    [TestMethod]
+    public void Process_UnsupportedBinaryIsSkippedWithoutRetryFailure()
+    {
+        using var db = new TestDatabase();
+        string storeDirectory = Path.Combine(Path.GetTempPath(), "kkr-maillens-tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            long attachmentId = AddAttachment(db);
+            var store = new EncryptedBlobStore(storeDirectory, new string('D', 64));
+            StoredBlob blob = store.Put(db.Connection, [0, 1, 2, 3]);
+            MailAttachmentRepository.MarkDownloaded(db.Connection, attachmentId, blob, "application/octet-stream");
+            using (var rename = db.Connection.CreateCommand())
+            {
+                rename.CommandText = "UPDATE mail_attachments SET filename='record.bin' WHERE id=$id;";
+                rename.Parameters.AddWithValue("$id", attachmentId);
+                rename.ExecuteNonQuery();
+            }
+            long documentId = ContentDocumentRepository.EnsureAttachmentDocument(
+                db.Connection, attachmentId, blob.Sha256, "application/octet-stream");
+
+            AttachmentExtractionOutcome outcome = AttachmentExtractionProcessor.Process(
+                db.Connection, store, attachmentId, documentId);
+
+            Assert.AreEqual("skipped", outcome.Status);
+            Assert.AreEqual("skipped", db.ScalarText("SELECT status FROM content_documents;"));
+            Assert.AreEqual("skipped", db.ScalarText("SELECT processing_status FROM mail_attachments;"));
+            Assert.AreEqual("unsupported-type", db.ScalarText("SELECT error_code FROM content_documents;"));
+        }
+        finally
+        {
+            try { Directory.Delete(storeDirectory, recursive: true); } catch { }
+        }
+    }
+
     static long AddAttachment(TestDatabase db)
     {
         GmailAccountRecord account = db.AddAccount();

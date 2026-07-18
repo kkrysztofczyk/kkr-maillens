@@ -17,9 +17,18 @@ static class AttachmentExtractionProcessor
         try
         {
             DetectedFile detected = FileTypeDetector.Detect(item.Filename, item.MimeType, plaintext);
-            ExtractionResult result = detected.MimeType.StartsWith("image/", StringComparison.Ordinal)
-                ? new ExtractionResult(detected.MimeType, "", "", false, [])
-                : new ContentExtractionDispatcher().Extract(item.Filename, item.MimeType, plaintext);
+            ExtractionResult result;
+            try
+            {
+                result = detected.MimeType.StartsWith("image/", StringComparison.Ordinal)
+                    ? new ExtractionResult(detected.MimeType, "", "", false, [])
+                    : new ContentExtractionDispatcher().Extract(item.Filename, item.MimeType, plaintext);
+            }
+            catch (NotSupportedException ex)
+            {
+                ContentDocumentRepository.MarkSkipped(connection, documentId, "unsupported-type", ex.Message);
+                return new AttachmentExtractionOutcome("skipped", detected.MimeType);
+            }
             string status = ContentDocumentRepository.SaveExtraction(
                 connection, documentId, result, ExtractorName(result), "1");
             return new AttachmentExtractionOutcome(status, result.DetectedMimeType);

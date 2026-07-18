@@ -25,12 +25,20 @@ sealed record ExtractionResult(
     public IReadOnlyList<int> OcrPageNumbers { get; init; } = [];
 }
 
-sealed record TextExtractionOptions(int MaxBytes = 25 * 1024 * 1024, int MaxCharacters = 2_000_000)
+sealed record TextExtractionOptions(
+    int MaxBytes = 25 * 1024 * 1024,
+    int MaxCharacters = 2_000_000,
+    int MaxArchiveEntries = 4_096,
+    long MaxArchiveExpandedBytes = 100L * 1024 * 1024,
+    int MaxArchiveCompressionRatio = 1_000)
 {
     public void Validate()
     {
         if (MaxBytes <= 0) throw new ArgumentOutOfRangeException(nameof(MaxBytes));
         if (MaxCharacters <= 0) throw new ArgumentOutOfRangeException(nameof(MaxCharacters));
+        if (MaxArchiveEntries <= 0) throw new ArgumentOutOfRangeException(nameof(MaxArchiveEntries));
+        if (MaxArchiveExpandedBytes <= 0) throw new ArgumentOutOfRangeException(nameof(MaxArchiveExpandedBytes));
+        if (MaxArchiveCompressionRatio <= 0) throw new ArgumentOutOfRangeException(nameof(MaxArchiveCompressionRatio));
     }
 }
 

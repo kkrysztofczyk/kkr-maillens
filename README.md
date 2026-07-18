@@ -77,7 +77,7 @@ Pierwszy import jest stronicowany i zapamiętuje checkpoint. Kolejne uruchomieni
 
 ## Załączniki, ekstrakcja i OCR
 
-Worker pobiera załączniki Gmaila do deduplikowanego magazynu szyfrowanego AES-GCM. Jawna zawartość jest odszyfrowywana wyłącznie w pamięci procesu. Obsługiwane ekstraktory deterministyczne obejmują TXT/CSV/XML/JSON, HTML, PDF z warstwą tekstową oraz DOCX/XLSX/PPTX. Segmenty zachowują odpowiednio numer strony, slajdu lub nazwę arkusza i trafiają do osobnego indeksu FTS5.
+Worker pobiera załączniki Gmaila do deduplikowanego magazynu szyfrowanego AES-GCM. Jawna zawartość jest odszyfrowywana wyłącznie w pamięci procesu. Obsługiwane ekstraktory deterministyczne obejmują TXT/CSV/XML/JSON, HTML, PDF z warstwą tekstową oraz DOCX/XLSX/PPTX. Segmenty zachowują odpowiednio numer strony, slajdu lub nazwę arkusza i trafiają do osobnego indeksu FTS5. Archiwa OpenXML podlegają limitom liczby wpisów, rozwiniętego rozmiaru i współczynnika kompresji; typy bez ekstraktora otrzymują status `skipped`.
 
 OCR obrazów PNG/JPEG/TIFF/BMP oraz skanowanych stron PDF korzysta z lokalnego Tesseracta przez `stdin`/`stdout`, bez tworzenia jawnego pliku tymczasowego. PDF jest analizowany strona po stronie: zachowywany jest poprawny tekst istniejący, a przez PDFium renderowane są wyłącznie strony puste lub zawierające zbyt mało użytecznego tekstu. Obrazy PNG stron pozostają tylko w pamięci i są zerowane po OCR.
 

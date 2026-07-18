@@ -31,7 +31,10 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Zapis strony Gmail obejmuje jedną transakcją wiadomości, korpus/FTS, metadane załączników i enqueue.
 - Zadanie `download` powstaje wyłącznie dla załącznika w stanie `metadata-only`; ponowny upsert nie przetwarza gotowej treści.
 - Puste wyniki OCR strony lub obrazu kończą dokument poprawnie, zachowując pozostałe segmenty zamiast oznaczać całość jako `failed`.
-- Zestaw testów wzrósł z historycznych 20/31 do 63 testów.
+- OpenXML ma limity liczby wpisów, rozmiaru po rozwinięciu i współczynnika kompresji oraz odrzuca niebezpieczne ścieżki archiwum.
+- Nieobsługiwane typy kończą się statusem `skipped`, bez trzech bezcelowych prób i szumu w `failed`.
+- Testy regresyjne obejmują przekroczenie limitu PDF i ekspansji archiwum OpenXML.
+- Zestaw testów wzrósł z historycznych 20/31 do 66 testów.
 
 ### Otwarte — priorytet
 
@@ -40,7 +43,6 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 ### Otwarte — roadmapa
 
 - Natychmiastowe anulowanie aktywnego zadania po zablokowaniu sesji.
-- Status `unsupported`/`skipped` dla typów bez ekstraktora zamiast szumu w `failed`.
 - Renderowanie stron PDF do OCR w batchach (dziś każdy `RenderAsync` parsuje dokument od nowa).
 - Graceful shutdown workera (`Console.CancelKeyPress` → `CancellationTokenSource`).
 - Garbage collection zaszyfrowanych blobów bez referencji.

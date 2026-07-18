@@ -1,4 +1,5 @@
 using DocumentFormat.OpenXml.Packaging;
+using System.IO.Compression;
 using A = DocumentFormat.OpenXml.Drawing;
 using P = DocumentFormat.OpenXml.Presentation;
 using S = DocumentFormat.OpenXml.Spreadsheet;
@@ -53,6 +54,7 @@ sealed class WordExtractor : IContentExtractor
     public ExtractionResult Extract(DetectedFile file, TextExtractionOptions options)
     {
         ExtractionLimits.Validate(file, options);
+        OpenXmlArchiveSafety.Validate(file.Content, options);
         using var stream = new MemoryStream(file.Content, writable: false);
         using WordprocessingDocument document = WordprocessingDocument.Open(stream, false);
         MainDocumentPart main = document.MainDocumentPart
@@ -85,6 +87,7 @@ sealed class ExcelExtractor : IContentExtractor
     public ExtractionResult Extract(DetectedFile file, TextExtractionOptions options)
     {
         ExtractionLimits.Validate(file, options);
+        OpenXmlArchiveSafety.Validate(file.Content, options);
         using var stream = new MemoryStream(file.Content, writable: false);
         using SpreadsheetDocument document = SpreadsheetDocument.Open(stream, false);
         WorkbookPart workbook = document.WorkbookPart
@@ -140,6 +143,7 @@ sealed class PowerPointExtractor : IContentExtractor
     public ExtractionResult Extract(DetectedFile file, TextExtractionOptions options)
     {
         ExtractionLimits.Validate(file, options);
+        OpenXmlArchiveSafety.Validate(file.Content, options);
         using var stream = new MemoryStream(file.Content, writable: false);
         using PresentationDocument document = PresentationDocument.Open(stream, false);
         PresentationPart presentation = document.PresentationPart
@@ -176,6 +180,36 @@ static class ExtractionLimits
         options.Validate();
         if (file.Content.Length > options.MaxBytes)
             throw new InvalidDataException($"Plik przekracza limit {options.MaxBytes} bajtów.");
+    }
+}
+
+static class OpenXmlArchiveSafety
+{
+    public static void Validate(byte[] content, TextExtractionOptions options)
+    {
+        using var stream = new MemoryStream(content, writable: false);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
+        if (archive.Entries.Count > options.MaxArchiveEntries)
+            throw new InvalidDataException($"Archiwum OpenXML przekracza limit {options.MaxArchiveEntries} wpisów.");
+
+        long expandedTotal = 0;
+        foreach (ZipArchiveEntry entry in archive.Entries)
+        {
+            string normalized = entry.FullName.Replace('\\', '/');
+            if (normalized.StartsWith("/", StringComparison.Ordinal)
+                || normalized.Split('/', StringSplitOptions.RemoveEmptyEntries).Contains("..", StringComparer.Ordinal))
+                throw new InvalidDataException("Archiwum OpenXML zawiera niebezpieczną ścieżkę wpisu.");
+
+            if (entry.Length > options.MaxArchiveExpandedBytes - expandedTotal)
+                throw new InvalidDataException(
+                    $"Archiwum OpenXML przekracza limit {options.MaxArchiveExpandedBytes} bajtów po rozwinięciu.");
+            expandedTotal += entry.Length;
+
+            long compressed = Math.Max(1, entry.CompressedLength);
+            if (entry.Length > compressed * (long)options.MaxArchiveCompressionRatio)
+                throw new InvalidDataException(
+                    $"Wpis archiwum OpenXML przekracza limit kompresji {options.MaxArchiveCompressionRatio}:1.");
+        }
     }
 }
 

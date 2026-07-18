@@ -127,6 +127,18 @@ static class ContentDocumentRepository
             """, ("$code", code), ("$message", message), ("$now", now), ("$id", documentId));
     }
 
+    public static void MarkSkipped(SqliteConnection connection, long documentId, string code, string message)
+    {
+        string now = DateTimeOffset.UtcNow.ToString("O");
+        Execute(connection, null, """
+            DELETE FROM content_segments WHERE document_id=$id;
+            UPDATE content_documents SET status='skipped',error_code=$code,error_message=$message,processed_at=$now
+            WHERE id=$id;
+            UPDATE mail_attachments SET processing_status='skipped',error_code=$code,error_message=$message,updated_at=$now
+            WHERE id=(SELECT attachment_id FROM content_documents WHERE id=$id);
+            """, ("$code", code), ("$message", message), ("$now", now), ("$id", documentId));
+    }
+
     static (long Id, string Source)? Find(SqliteConnection connection, SqliteTransaction transaction,
         long attachmentId, int pipelineVersion)
     {
