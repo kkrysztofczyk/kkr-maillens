@@ -13,6 +13,8 @@ sealed record ContentSearchHit(
     int? PageNumber,
     int? SlideNumber,
     string? SheetName,
+    long? StartMs,
+    long? EndMs,
     string Snippet,
     double Rank);
 
@@ -26,7 +28,7 @@ static class ContentSearch
         command.CommandText = """
             SELECT s.id,m.received,m.subject,COALESCE(NULLIF(m.sender_name,''),m.sender_email),
                 COALESCE(a.filename,''),COALESCE(d.detected_mime_type,''),s.page_number,s.slide_number,
-                s.sheet_name,snippet(content_fts,4,'[',']','…',24),
+                s.sheet_name,s.start_ms,s.end_ms,snippet(content_fts,4,'[',']','…',24),
                 bm25(content_fts,10.0,5.0,2.0,8.0,1.0)
             FROM content_fts
             JOIN content_segments s ON s.id=content_fts.rowid
@@ -45,7 +47,8 @@ static class ContentSearch
         {
             hits.Add(new ContentSearchHit(reader.GetInt64(0), Text(reader, 1), Text(reader, 2), Text(reader, 3),
                 Text(reader, 4), Text(reader, 5), NullableInt(reader, 6), NullableInt(reader, 7),
-                reader.IsDBNull(8) ? null : reader.GetString(8), Text(reader, 9), reader.GetDouble(10)));
+                reader.IsDBNull(8) ? null : reader.GetString(8), NullableLong(reader, 9), NullableLong(reader, 10),
+                Text(reader, 11), reader.GetDouble(12)));
         }
         return hits;
     }
@@ -148,11 +151,19 @@ static class ContentSearch
         if (hit.PageNumber is not null) return $"strona {hit.PageNumber}: ";
         if (hit.SlideNumber is not null) return $"slajd {hit.SlideNumber}: ";
         if (!string.IsNullOrWhiteSpace(hit.SheetName)) return $"arkusz {hit.SheetName}: ";
+        if (hit.StartMs is not null) return $"{Timestamp(hit.StartMs.Value)}–{Timestamp(hit.EndMs ?? hit.StartMs.Value)}: ";
         return "";
+    }
+
+    static string Timestamp(long milliseconds)
+    {
+        long seconds = Math.Max(0, milliseconds) / 1000;
+        return $"{seconds / 3600:00}:{seconds / 60 % 60:00}:{seconds % 60:00}";
     }
 
     static string Text(SqliteDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? "" : reader.GetString(ordinal);
     static int? NullableInt(SqliteDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetInt32(ordinal);
+    static long? NullableLong(SqliteDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetInt64(ordinal);
 
     internal static void IndexSavedDocument(SqliteConnection connection, SqliteTransaction transaction, long documentId) =>
         IndexDocument(connection, transaction, documentId);

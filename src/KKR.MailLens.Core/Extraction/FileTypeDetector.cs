@@ -26,6 +26,18 @@ static class FileTypeDetector
         else if (extension == ".xlsx") mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
         else if (extension == ".pptx") mimeType = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
         else if (extension == ".pdf") mimeType = "application/pdf";
+        else if (extension is ".wav" or ".mp3" or ".m4a" or ".aac" or ".flac" or ".ogg" or ".opus")
+            mimeType = extension switch
+            {
+                ".wav" => "audio/wav", ".mp3" => "audio/mpeg", ".flac" => "audio/flac",
+                ".ogg" or ".opus" => "audio/ogg", _ => "audio/mp4",
+            };
+        else if (extension is ".mp4" or ".mov" or ".mkv" or ".webm" or ".avi")
+            mimeType = extension switch
+            {
+                ".webm" => "video/webm", ".mkv" => "video/x-matroska", ".avi" => "video/x-msvideo",
+                _ => "video/mp4",
+            };
         else if (mimeType == "text/plain" || extension is ".txt" or ".text" or ".log") mimeType = "text/plain";
         else if (mimeType is "application/json" or "application/xml" || extension is ".json" or ".xml" or ".csv")
             mimeType = extension switch { ".json" => "application/json", ".xml" => "application/xml", ".csv" => "text/csv", _ => mimeType };
@@ -55,6 +67,12 @@ static class FileTypeDetector
         if (content.AsSpan().StartsWith(new byte[] { 0xFF, 0xD8, 0xFF })) return "image/jpeg";
         if (content.AsSpan().StartsWith("II*\0"u8) || content.AsSpan().StartsWith("MM\0*"u8)) return "image/tiff";
         if (content.AsSpan().StartsWith("BM"u8)) return "image/bmp";
+        if (content.Length >= 12 && content.AsSpan(0, 4).SequenceEqual("RIFF"u8)
+            && content.AsSpan(8, 4).SequenceEqual("WAVE"u8)) return "audio/wav";
+        if (content.AsSpan().StartsWith("fLaC"u8)) return "audio/flac";
+        if (content.AsSpan().StartsWith("OggS"u8)) return "audio/ogg";
+        if (content.AsSpan().StartsWith("ID3"u8)
+            || LooksLikeMpegAudioFrame(content)) return "audio/mpeg";
         if (!content.AsSpan().StartsWith("PK\x03\x04"u8)) return null;
 
         try
@@ -73,5 +91,14 @@ static class FileTypeDetector
             return null;
         }
         return null;
+    }
+
+    static bool LooksLikeMpegAudioFrame(byte[] content)
+    {
+        if (content.Length < 4 || content[0] != 0xFF || (content[1] & 0xE0) != 0xE0) return false;
+        if ((content[1] & 0x18) == 0x08 || (content[1] & 0x06) == 0) return false;
+        int bitrateIndex = content[2] >> 4;
+        int sampleRateIndex = (content[2] >> 2) & 0x03;
+        return bitrateIndex is > 0 and < 15 && sampleRateIndex < 3;
     }
 }

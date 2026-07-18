@@ -36,7 +36,8 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Testy regresyjne obejmują przekroczenie limitu PDF i ekspansji archiwum OpenXML.
 - Worker uruchamiany przez CLI działa w Windows Job Object z łącznym limitem pamięci obejmującym procesy potomne.
 - Ctrl+C i utrata odblokowanej sesji anulują operacje zewnętrzne; zadanie wraca do kolejki bez zużycia próby.
-- Zestaw testów wzrósł z historycznych 20/31 do 67 testów.
+- Działa lokalny pipeline FFmpeg → whisper.cpp z timestampami segmentów, FTS5 i sprzątaniem jawnych plików roboczych.
+- Zestaw testów wzrósł z historycznych 20/31 do 70 testów.
 
 ### Otwarte — priorytet
 
@@ -48,4 +49,4 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Garbage collection zaszyfrowanych blobów bez referencji.
 - Testy odbudowy FTS i współdzielonych blobów.
 - Obsługa Gmaila i wyników `content_fts` w GUI.
-- Załączniki Outlook/IMAP, transkrypcja audio/wideo oraz opcjonalne lokalne AI.
+- Załączniki Outlook/IMAP oraz opcjonalne lokalne AI.

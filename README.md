@@ -4,9 +4,9 @@ KKR MailLens tworzy lokalny, szyfrowany indeks poczty do wyszukiwania pełnoteks
 
 ## Stan projektu
 
-Aktualnie działa import Outlook/IMAP oraz pełna i przyrostowa synchronizacja Gmail API z CLI. Pipeline Gmail obejmuje trwałą kolejkę, pobieranie załączników, szyfrowany i deduplikowany magazyn blobów, ekstrakcję TXT/HTML/PDF/DOCX/XLSX/PPTX, lokalny OCR obrazów i mieszanych PDF-ów oraz osobny indeks `content_fts`.
+Aktualnie działa import Outlook/IMAP oraz pełna i przyrostowa synchronizacja Gmail API z CLI. Pipeline Gmail obejmuje trwałą kolejkę, pobieranie załączników, szyfrowany i deduplikowany magazyn blobów, ekstrakcję TXT/HTML/PDF/DOCX/XLSX/PPTX, lokalny OCR obrazów i mieszanych PDF-ów, transkrypcję audio/wideo przez FFmpeg i whisper.cpp oraz osobny indeks `content_fts`.
 
-Nie są jeszcze dostępne: obsługa Gmaila i wyników załączników w GUI, pobieranie załączników Outlook/IMAP, transkrypcja audio/wideo, garbage collection osieroconych blobów oraz wyszukiwanie semantyczne. Bieżący status ustaleń technicznych znajduje się w [indeksie audytów](docs/audits/README.md).
+Nie są jeszcze dostępne: obsługa Gmaila i wyników załączników w GUI, pobieranie załączników Outlook/IMAP, garbage collection osieroconych blobów oraz wyszukiwanie semantyczne. Bieżący status ustaleń technicznych znajduje się w [indeksie audytów](docs/audits/README.md).
 
 ## Wymagania
 
@@ -15,6 +15,7 @@ Nie są jeszcze dostępne: obsługa Gmaila i wyników załączników w GUI, pobi
 - źródło desktopowe obsługiwane przez integrację COM, konto IMAP albo konto Gmail połączone przez OAuth 2.0
 - opcjonalny sprzętowy drugi składnik uwierzytelnienia
 - opcjonalnie Tesseract 5 z danymi językowymi `pol` i `eng` do lokalnego OCR obrazów i skanowanych PDF-ów
+- opcjonalnie FFmpeg, `whisper-cli` z projektu whisper.cpp i lokalny model `ggml-small.bin` do transkrypcji audio/wideo
 
 ## Build
 
@@ -93,6 +94,20 @@ run\KKR.MailLens.exe rebuild-content-index
 PDF bez użytecznej warstwy tekstowej na co najmniej jednej stronie otrzymuje status `needs-ocr`, po czym Worker automatycznie zleca OCR tych stron. Segmenty tekstowe i OCR są scalane według numeru strony i indeksowane w FTS5. Podczas długiego OCR Worker odnawia dzierżawę zadania po każdej stronie.
 
 `processing-run` uruchamia Workera w Windows Job Object z konfigurowalnym łącznym limitem pamięci, obejmującym także procesy potomne. Ctrl+C i zablokowanie sesji anulują aktywne operacje Gmail/Tesseract/PDF; zadanie wraca do kolejki bez zużycia próby. Bezpośrednie uruchomienie `KKR.MailLens.Worker.exe` omija limit nakładany przez launcher CLI.
+
+## Transkrypcja audio i wideo
+
+Media są przekazywane do FFmpeg przez `stdin` i normalizowane do mono PCM 16 kHz. Whisper.cpp zapisuje lokalny JSON, którego segmenty wraz z `start_ms`/`end_ms` trafiają do `content_segments` oraz `content_fts`. Jawny WAV i JSON istnieją tylko w osobnym katalogu roboczym na czas zadania; katalog jest usuwany w `finally`, a osierocone katalogi po awarii są sprzątane przy następnym uruchomieniu transkrypcji.
+
+Repozytorium nie zawiera binariów ani modelu. Zalecany model początkowy to wielojęzyczny `small`. Po zainstalowaniu lokalnych narzędzi ustaw ścieżki:
+
+```powershell
+run\KKR.MailLens.exe config --ffmpeg "C:\Tools\ffmpeg\bin\ffmpeg.exe" --whisper "C:\Tools\whisper.cpp\whisper-cli.exe" --whisper-model "C:\Models\ggml-small.bin" --whisper-language auto --ffmpeg-timeout 600 --whisper-timeout 3600 --transcription-max-minutes 120
+run\KKR.MailLens.exe processing-run
+run\KKR.MailLens.exe query-content "neutralny tekst"
+```
+
+Transkrypcja jest całkowicie lokalna, bez diarization i usług sieciowych. Limit pobieranego załącznika Gmail pozostaje bez zmian; domyślnie analizowane jest maksymalnie 120 minut jednego pliku.
 
 ## Neutralne dane przykładowe
 

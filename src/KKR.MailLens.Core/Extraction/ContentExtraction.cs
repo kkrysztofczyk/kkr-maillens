@@ -13,7 +13,9 @@ sealed record ExtractedSegment(
     string? SheetName = null,
     string? Heading = null,
     double? Confidence = null,
-    string? MetadataJson = null);
+    string? MetadataJson = null,
+    long? StartMs = null,
+    long? EndMs = null);
 
 sealed record ExtractionResult(
     string DetectedMimeType,
@@ -23,6 +25,7 @@ sealed record ExtractionResult(
     IReadOnlyList<ExtractedSegment> Segments)
 {
     public IReadOnlyList<int> OcrPageNumbers { get; init; } = [];
+    public string? DetectedLanguage { get; init; }
 }
 
 sealed record TextExtractionOptions(

@@ -58,6 +58,17 @@ run\KKR.MailLens.exe processing-run
 OCR przekazuje obrazy przez pamięć i strumienie procesu, bez jawnego pliku tymczasowego. Worker automatycznie renderuje przez PDFium tylko strony PDF bez użytecznej warstwy tekstowej, wykonuje OCR strona po stronie, scala wynik według numerów stron i aktualizuje indeks FTS5.
 Uruchomienie przez `processing-run` nakłada limit pamięci na Workera i procesy potomne; Ctrl+C lub zablokowanie sesji bezpiecznie zwraca aktywne zadanie do kolejki.
 
+## Lokalna transkrypcja
+
+Po zainstalowaniu FFmpeg, `whisper-cli` i wielojęzycznego modelu whisper.cpp:
+
+```powershell
+run\KKR.MailLens.exe config --ffmpeg "C:\Tools\ffmpeg\bin\ffmpeg.exe" --whisper "C:\Tools\whisper.cpp\whisper-cli.exe" --whisper-model "C:\Models\ggml-small.bin" --whisper-language auto
+run\KKR.MailLens.exe processing-run
+```
+
+Audio z nagrań i filmów jest lokalnie konwertowane do mono PCM 16 kHz. Segmenty transkrypcji zachowują zakres czasu i są dostępne przez `query-content`. Pliki robocze WAV/JSON są usuwane po zadaniu i nie trafiają do repozytorium.
+
 Aktualny status funkcji oraz ustaleń bezpieczeństwa znajduje się w [indeksie audytów](docs/audits/README.md).
 
 ## Lokalizacja danych

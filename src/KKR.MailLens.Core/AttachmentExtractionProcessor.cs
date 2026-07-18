@@ -21,6 +21,8 @@ static class AttachmentExtractionProcessor
             try
             {
                 result = detected.MimeType.StartsWith("image/", StringComparison.Ordinal)
+                    || detected.MimeType.StartsWith("audio/", StringComparison.Ordinal)
+                    || detected.MimeType.StartsWith("video/", StringComparison.Ordinal)
                     ? new ExtractionResult(detected.MimeType, "", "", false, [])
                     : new ContentExtractionDispatcher().Extract(item.Filename, item.MimeType, plaintext);
             }

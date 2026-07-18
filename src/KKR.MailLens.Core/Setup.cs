@@ -76,6 +76,7 @@ static class Setup
         DeleteFileIfExists(Paths.GmailCancelFile);
         DeleteDirectoryIfExists(Paths.GmailTokensDir);
         DeleteDirectoryIfExists(Paths.BlobsDir);
+        DeleteDirectoryIfExists(Paths.TempDir);
     }
 
     static void DeleteFileIfExists(string path)

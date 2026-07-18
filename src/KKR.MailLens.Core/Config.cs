@@ -20,6 +20,13 @@ sealed class AppConfig
     public int OcrMaxPdfPages { get; set; } = 100;
     public int OcrPdfRenderTimeoutSeconds { get; set; } = 120;
     public int WorkerMemoryLimitMb { get; set; } = 1536;
+    public string FfmpegPath { get; set; } = "ffmpeg.exe";
+    public string WhisperPath { get; set; } = "whisper-cli.exe";
+    public string WhisperModelPath { get; set; } = "";
+    public string WhisperLanguage { get; set; } = "auto";
+    public int FfmpegTimeoutSeconds { get; set; } = 600;
+    public int WhisperTimeoutSeconds { get; set; } = 3600;
+    public int TranscriptionMaxMinutes { get; set; } = 120;
 
     /// <summary>Efektywny cap dla skanera (&lt;=0 traktujemy jako "bez limitu"). Nie serializowane.</summary>
     [JsonIgnore]

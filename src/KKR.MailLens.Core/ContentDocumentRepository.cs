@@ -77,36 +77,41 @@ static class ContentDocumentRepository
 
     public static string SaveExtraction(SqliteConnection connection, long documentId, ExtractionResult result,
         string extractorName, string extractorVersion, string documentKind = "attachment", string? modelName = null,
-        bool ocrCompleted = false)
+        bool ocrCompleted = false, bool transcriptionCompleted = false)
     {
         string now = DateTimeOffset.UtcNow.ToString("O");
         bool canUseOcr = result.DetectedMimeType == "application/pdf"
             || result.DetectedMimeType.StartsWith("image/", StringComparison.Ordinal);
         bool hasMissingPdfPages = result.DetectedMimeType == "application/pdf"
             && result.OcrPageNumbers.Count > 0;
+        bool canTranscribe = result.DetectedMimeType.StartsWith("audio/", StringComparison.Ordinal)
+            || result.DetectedMimeType.StartsWith("video/", StringComparison.Ordinal);
         string status = !ocrCompleted && canUseOcr && (result.CleanText.Length == 0 || hasMissingPdfPages)
             ? "needs-ocr"
-            : "completed";
+            : !transcriptionCompleted && canTranscribe && result.CleanText.Length == 0
+                ? "needs-transcription" : "completed";
         using var transaction = connection.BeginTransaction();
         Execute(connection, transaction, "DELETE FROM content_segments WHERE document_id=$id;", ("$id", documentId));
         foreach (ExtractedSegment segment in result.Segments)
         {
             Execute(connection, transaction, """
-                INSERT INTO content_segments(document_id,ordinal,page_number,slide_number,sheet_name,heading,
+                INSERT INTO content_segments(document_id,ordinal,page_number,slide_number,sheet_name,start_ms,end_ms,heading,
                     raw_text,clean_text,confidence,metadata_json)
-                VALUES($document,$ordinal,$page,$slide,$sheet,$heading,$raw,$clean,$confidence,$metadata);
+                VALUES($document,$ordinal,$page,$slide,$sheet,$start,$end,$heading,$raw,$clean,$confidence,$metadata);
                 """, ("$document", documentId), ("$ordinal", segment.Ordinal), ("$page", segment.PageNumber),
                 ("$slide", segment.SlideNumber), ("$sheet", segment.SheetName), ("$heading", segment.Heading),
+                ("$start", segment.StartMs), ("$end", segment.EndMs),
                 ("$raw", segment.RawText), ("$clean", segment.CleanText), ("$confidence", segment.Confidence),
                 ("$metadata", segment.MetadataJson));
         }
         Execute(connection, transaction, """
-            UPDATE content_documents SET document_kind=$kind,detected_mime_type=$mime,extractor_name=$extractor,
+            UPDATE content_documents SET document_kind=$kind,detected_mime_type=$mime,detected_language=$language,extractor_name=$extractor,
                 extractor_version=$version,model_name=$model,status=$status,
                 error_code=NULL,error_message=NULL,processed_at=$now
             WHERE id=$id;
             """, ("$kind", documentKind), ("$mime", result.DetectedMimeType), ("$extractor", extractorName),
-            ("$version", extractorVersion), ("$model", modelName), ("$status", status), ("$now", now), ("$id", documentId));
+            ("$language", result.DetectedLanguage), ("$version", extractorVersion), ("$model", modelName),
+            ("$status", status), ("$now", now), ("$id", documentId));
         Execute(connection, transaction, """
             UPDATE mail_attachments SET processing_status=$status,error_code=NULL,error_message=NULL,updated_at=$now
             WHERE id=(SELECT attachment_id FROM content_documents WHERE id=$id);

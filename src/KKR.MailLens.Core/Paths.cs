@@ -21,4 +21,5 @@ static class Paths
     public static string GmailTokensDir => Path.Combine(Base, "oauth-tokens"); // tokeny OAuth (sesja + DPAPI)
     public static string GmailCancelFile => Path.Combine(Base, "gmail-sync.cancel"); // lokalny znacznik anulowania synchronizacji
     public static string BlobsDir => Path.Combine(Base, "blobs"); // zaszyfrowane, deduplikowane załączniki
+    public static string TempDir => Path.Combine(Base, "temp"); // krótkotrwałe pliki narzędzi lokalnych
 }

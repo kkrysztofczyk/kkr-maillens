@@ -48,6 +48,8 @@ try
                     if (outcome.Status == "needs-ocr" && (outcome.DetectedMimeType == "application/pdf"
                         || outcome.DetectedMimeType.StartsWith("image/", StringComparison.Ordinal)))
                         ProcessingJobRepository.Enqueue(connection, "ocr", job.AttachmentId.Value, job.DocumentId.Value);
+                    else if (outcome.Status == "needs-transcription" && MediaTypes.IsMedia(outcome.DetectedMimeType))
+                        ProcessingJobRepository.Enqueue(connection, "transcribe", job.AttachmentId.Value, job.DocumentId.Value);
                     break;
                 case "ocr":
                     if (job.AttachmentId is null || job.DocumentId is null)
@@ -71,6 +73,30 @@ try
                             shutdown.Token.ThrowIfCancellationRequested();
                             if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, ocrLeaseDuration))
                                 throw new InvalidOperationException("Worker utracił lease zadania OCR.");
+                    });
+                    break;
+                case "transcribe":
+                    if (job.AttachmentId is null || job.DocumentId is null)
+                        throw new InvalidDataException("Zadanie transkrypcji nie wskazuje dokumentu i załącznika.");
+                    AppConfig transcriptionConfig = AppConfig.Load();
+                    int ffmpegTimeoutSeconds = Math.Clamp(transcriptionConfig.FfmpegTimeoutSeconds, 10, 3600);
+                    int whisperTimeoutSeconds = Math.Clamp(transcriptionConfig.WhisperTimeoutSeconds, 30, 24 * 3600);
+                    TimeSpan transcriptionLeaseDuration = TimeSpan.FromSeconds(
+                        ffmpegTimeoutSeconds + whisperTimeoutSeconds + 60);
+                    if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, transcriptionLeaseDuration))
+                        throw new InvalidOperationException("Worker utracił lease zadania transkrypcji.");
+                    var transcriptionOptions = new MediaTranscriptionOptions(
+                        transcriptionConfig.FfmpegPath, transcriptionConfig.WhisperPath,
+                        transcriptionConfig.WhisperModelPath, transcriptionConfig.WhisperLanguage,
+                        TimeSpan.FromSeconds(ffmpegTimeoutSeconds), TimeSpan.FromSeconds(whisperTimeoutSeconds),
+                        Math.Clamp(transcriptionConfig.TranscriptionMaxMinutes, 1, 24 * 60));
+                    await MediaTranscriptionProcessor.ProcessAsync(connection, store, job.AttachmentId.Value,
+                        job.DocumentId.Value, new FfmpegWhisperTranscriber(transcriptionOptions), shutdown.Token,
+                        heartbeat: () =>
+                        {
+                            shutdown.Token.ThrowIfCancellationRequested();
+                            if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, transcriptionLeaseDuration))
+                                throw new InvalidOperationException("Worker utracił lease zadania transkrypcji.");
                         });
                     break;
                 default:

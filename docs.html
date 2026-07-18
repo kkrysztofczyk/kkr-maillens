@@ -35,7 +35,14 @@
 
   <section>
     <h2>Stan projektu</h2>
-    <p>Działa synchronizacja Gmail z CLI, kolejka Workera, szyfrowany magazyn załączników, ekstrakcja dokumentów, OCR obrazów i mieszanych PDF-ów oraz osobny indeks FTS5 załączników. Panel Gmail w GUI, załączniki Outlook/IMAP, transkrypcja audio/wideo, garbage collection blobów i wyszukiwanie semantyczne pozostają na roadmapie.</p>
+    <p>Działa synchronizacja Gmail z CLI, kolejka Workera, szyfrowany magazyn załączników, ekstrakcja dokumentów, OCR obrazów i mieszanych PDF-ów, lokalna transkrypcja FFmpeg/whisper.cpp oraz osobny indeks FTS5 załączników. Panel Gmail w GUI, załączniki Outlook/IMAP, garbage collection blobów i wyszukiwanie semantyczne pozostają na roadmapie.</p>
+  </section>
+
+  <section>
+    <h2>Transkrypcja lokalna</h2>
+    <p>FFmpeg normalizuje audio i wideo do mono PCM 16 kHz, a lokalny <code>whisper-cli</code> tworzy segmenty z timestampami indeksowane w <code>content_fts</code>. Jawne pliki WAV/JSON są krótkotrwałe i usuwane po zadaniu.</p>
+    <pre>run\KKR.MailLens.exe config --ffmpeg "C:\Tools\ffmpeg\bin\ffmpeg.exe" --whisper "C:\Tools\whisper.cpp\whisper-cli.exe" --whisper-model "C:\Models\ggml-small.bin" --whisper-language auto
+run\KKR.MailLens.exe processing-run</pre>
   </section>
 
   <section>

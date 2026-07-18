@@ -60,6 +60,16 @@ static class Cli
         if (GetStr(args, "--worker-memory-mb") is { } workerMemory
             && int.TryParse(workerMemory, out int memoryMb))
         { cfg.WorkerMemoryLimitMb = Math.Clamp(memoryMb, 256, 16_384); changed = true; }
+        if (GetStr(args, "--ffmpeg") is { } ffmpeg) { cfg.FfmpegPath = ffmpeg.Trim(); changed = true; }
+        if (GetStr(args, "--whisper") is { } whisper) { cfg.WhisperPath = whisper.Trim(); changed = true; }
+        if (GetStr(args, "--whisper-model") is { } model) { cfg.WhisperModelPath = model.Trim(); changed = true; }
+        if (GetStr(args, "--whisper-language") is { } language) { cfg.WhisperLanguage = language.Trim(); changed = true; }
+        if (GetStr(args, "--ffmpeg-timeout") is { } ffmpegTimeout && int.TryParse(ffmpegTimeout, out int ffmpegSeconds))
+        { cfg.FfmpegTimeoutSeconds = Math.Clamp(ffmpegSeconds, 10, 3600); changed = true; }
+        if (GetStr(args, "--whisper-timeout") is { } whisperTimeout && int.TryParse(whisperTimeout, out int whisperSeconds))
+        { cfg.WhisperTimeoutSeconds = Math.Clamp(whisperSeconds, 30, 24 * 3600); changed = true; }
+        if (GetStr(args, "--transcription-max-minutes") is { } duration && int.TryParse(duration, out int minutes))
+        { cfg.TranscriptionMaxMinutes = Math.Clamp(minutes, 1, 24 * 60); changed = true; }
         if (changed) { cfg.Save(); Console.WriteLine($"Zapisano config: {Paths.ConfigFile}"); }
 
         Console.WriteLine($"Katalog danych: {Paths.Base}");
@@ -69,7 +79,10 @@ static class Cli
         Console.WriteLine($"OCR          : {cfg.OcrLanguages}, timeout {cfg.OcrTimeoutSeconds} s");
         Console.WriteLine($"OCR PDF      : {cfg.OcrPdfDpi} DPI, max {cfg.OcrMaxPdfPages} stron, render timeout {cfg.OcrPdfRenderTimeoutSeconds} s/strona");
         Console.WriteLine($"Worker       : limit pamięci {cfg.WorkerMemoryLimitMb} MiB");
-        if (!changed) Console.WriteLine("Zmiana: config [--store <fragment>] [--max N] [--tesseract <sciezka>] [--ocr-languages pol+eng] [--ocr-timeout N] [--ocr-pdf-dpi N] [--ocr-max-pdf-pages N] [--ocr-pdf-render-timeout N] [--worker-memory-mb N]");
+        Console.WriteLine($"FFmpeg       : {cfg.FfmpegPath}, timeout {cfg.FfmpegTimeoutSeconds} s");
+        Console.WriteLine($"whisper.cpp  : {cfg.WhisperPath}, model '{cfg.WhisperModelPath}', język {cfg.WhisperLanguage}, timeout {cfg.WhisperTimeoutSeconds} s");
+        Console.WriteLine($"Transkrypcja : max {cfg.TranscriptionMaxMinutes} min");
+        if (!changed) Console.WriteLine("Zmiana: config [--store <fragment>] [--max N] [--tesseract <sciezka>] [--ocr-languages pol+eng] [--ocr-timeout N] [--ocr-pdf-dpi N] [--ocr-max-pdf-pages N] [--ocr-pdf-render-timeout N] [--worker-memory-mb N] [--ffmpeg <sciezka>] [--whisper <sciezka>] [--whisper-model <plik>] [--whisper-language auto] [--ffmpeg-timeout N] [--whisper-timeout N] [--transcription-max-minutes N]");
         return 0;
     }
 
@@ -529,6 +542,9 @@ static class Cli
               config [--store <fragm>] [--max <N>] [--tesseract <sciezka>] [--ocr-languages pol+eng]
                      [--ocr-timeout N] [--ocr-pdf-dpi N] [--ocr-max-pdf-pages N]
                      [--ocr-pdf-render-timeout N] [--worker-memory-mb N]
+                     [--ffmpeg <sciezka>] [--whisper <sciezka>] [--whisper-model <plik>]
+                     [--whisper-language auto] [--ffmpeg-timeout N] [--whisper-timeout N]
+                     [--transcription-max-minutes N]
                                                    konfiguracja importu i lokalnego OCR
               harvest [--store <fragm>] [--since yyyy-MM-dd] [--max <N>] [--folders "A,B,C"]
                                                    zbierz foldery do korpusu (store/limit domyslnie z config.json;
