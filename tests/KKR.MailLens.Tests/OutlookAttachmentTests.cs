@@ -45,6 +45,17 @@ public sealed class OutlookAttachmentTests
     }
 
     [TestMethod]
+    public void Harvest_RejectsCancellationBeforeAccessingOutlook()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        using var outlook = new Outlook();
+
+        Assert.Throws<OperationCanceledException>(() => outlook.HarvestMail(
+            null, null, 1, _ => { }, null, _ => { }, cancellationToken: cancellation.Token));
+    }
+
+    [TestMethod]
     public void CorpusUpsert_QueuesOutlookAttachment()
     {
         using var db = new TestDatabase();

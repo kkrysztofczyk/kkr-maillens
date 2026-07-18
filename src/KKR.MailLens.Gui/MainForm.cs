@@ -43,6 +43,7 @@ sealed class MainForm : Form
     readonly System.Windows.Forms.Timer _tick = new() { Interval = 1000 };
     readonly Agent _agent = new();
     readonly NotifyIcon _tray = new() { Icon = System.Drawing.SystemIcons.Shield, Text = "KKR MailLens", Visible = false };
+    CancellationTokenSource? _activeHarvest;
     bool _reallyExit, _balloonShown;
 
     public MainForm()
@@ -122,7 +123,7 @@ sealed class MainForm : Form
 
         _init.Click += async (_, _) => await DoInit();
         _unlock.Click += async (_, _) => await DoUnlock();
-        _lock.Click += (_, _) => { RamSession.Clear(); Session.Lock(); _pin.Clear(); RefreshStatus(); Log("Zablokowano - klucz usuniety z RAM."); };
+        _lock.Click += (_, _) => LockSession("Zablokowano - klucz usunięty z RAM.");
         _searchBtn.Click += async (_, _) => await DoSearch();
         _statsBtn.Click += async (_, _) => await RunCapture(() => Query.Stats(RamSession.Key!), "statystyki...");
         _harvestBtn.Click += async (_, _) => await DoHarvest();
@@ -137,7 +138,7 @@ sealed class MainForm : Form
         // Tray: minimalizacja/zamkniecie chowa do zasobnika (sesja zyje w tle); wyjscie tylko z menu.
         var menu = new ContextMenuStrip();
         menu.Items.Add("Pokaz okno", null, (_, _) => RestoreFromTray());
-        menu.Items.Add("Zablokuj sesje", null, (_, _) => { RamSession.Clear(); RefreshStatus(); });
+        menu.Items.Add("Zablokuj sesje", null, (_, _) => LockSession("Zablokowano sesję z zasobnika."));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Zamknij (konczy sesje)", null, (_, _) => { _reallyExit = true; Close(); });
         _tray.ContextMenuStrip = menu;
@@ -198,14 +199,29 @@ sealed class MainForm : Form
     int _pollN;
     void OnTick()
     {
+        if (_activeHarvest is { IsCancellationRequested: false } active && !RamSession.Unlocked)
+        {
+            active.Cancel();
+            _lock.Enabled = false;
+            Log("Sesja wygasła lub została zablokowana — anuluję aktywny harvest.");
+        }
         RefreshStatus();
         // co ~5s: jesli tryb pin+yubi i odblokowane, sprawdz czy klucz nadal wpiety -> auto-lock po wyjeciu
         if (RamSession.Unlocked && Mode.Yubi && (++_pollN % 5 == 0) && !YubiKey.TryInfo(out _))
         {
-            RamSession.Clear();
-            RefreshStatus();
-            Log("YubiKey wyjety - sesja zablokowana (auto-lock).");
+            LockSession("YubiKey wyjęty — sesja zablokowana (auto-lock).");
         }
+    }
+
+    void LockSession(string message)
+    {
+        _activeHarvest?.Cancel();
+        RamSession.Clear();
+        Session.Lock();
+        _pin.Clear();
+        _lock.Enabled = false;
+        RefreshStatus();
+        Log(message);
     }
 
     void HideToTray()
@@ -236,6 +252,7 @@ sealed class MainForm : Form
             HideToTray();
             return;
         }
+        _activeHarvest?.Cancel();
         RamSession.Clear(); // zeroizacja best-effort przy realnym wyjsciu
         _agent.Dispose();   // zatrzymaj serwer pipe
         _tray.Visible = false;
@@ -494,11 +511,15 @@ sealed class MainForm : Form
         string storeDisp = cfg.StoreFilter.Length == 0 ? "wszystkie skrzynki" : $"store~{cfg.StoreFilter}";
         Log($"Harvest [{zakres}] wszystkie foldery bez usunietych/draft ({storeDisp})...");
         SetBusy(true, $"harvest [{zakres}]...");
+        _lock.Enabled = true;
         _prog.Value = 0; _prog.Visible = true;
+        using var cancellation = new CancellationTokenSource();
+        _activeHarvest = cancellation;
         try
         {
             string msg = await Task.Run(() =>
             {
+                cancellation.Token.ThrowIfCancellationRequested();
                 Action<int, int> prog = (done, total) => { try { BeginInvoke(() => UpdateProgress(zakres, done, total)); } catch { } };
                 string stamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
                 using var c = Db.Open(key, create: false); // init gwarantuje istnienie bazy; nie tworzymy po cichu
@@ -506,13 +527,29 @@ sealed class MainForm : Form
                 int ins = 0, upd = 0;
                 using (var ol = new Outlook())
                     ol.HarvestMail(cfg.StoreFilter, since, cfg.EffectiveMax, _ => { }, prog,
-                        batch => { var st = Corpus.Upsert(c, batch, stamp); ins += st.Inserted; upd += st.Updated; }); // zapis porcjami
+                        batch =>
+                        {
+                            cancellation.Token.ThrowIfCancellationRequested();
+                            var st = Corpus.Upsert(c, batch, stamp, cancellation.Token);
+                            ins += st.Inserted;
+                            upd += st.Updated;
+                        }, cancellationToken: cancellation.Token); // zapis porcjami
                 return $"Harvest: +{ins} nowych, {upd} zaktualizowanych. Korpus: {Corpus.Count(c)} maili.";
-            });
+            }, cancellation.Token);
             Log(msg);
         }
+        catch (OperationCanceledException)
+        {
+            Log("Harvest anulowany po zablokowaniu sesji; wcześniej zapisane porcje pozostają w korpusie.");
+        }
         catch (Exception ex) { Log("Blad harvest: " + ex.Message); }
-        finally { _prog.Visible = false; SetBusy(false); RefreshStatus(); }
+        finally
+        {
+            if (ReferenceEquals(_activeHarvest, cancellation)) _activeHarvest = null;
+            _prog.Visible = false;
+            SetBusy(false);
+            RefreshStatus();
+        }
     }
 
     void UpdateProgress(string zakres, int done, int total)

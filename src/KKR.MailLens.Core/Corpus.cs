@@ -8,16 +8,18 @@ static class Corpus
 {
     public sealed record Stats(int Inserted, int Updated);
 
-    public static Stats Upsert(SqliteConnection c, IEnumerable<HarvestedMail> mails, string harvestedAt)
+    public static Stats Upsert(SqliteConnection c, IEnumerable<HarvestedMail> mails, string harvestedAt,
+        CancellationToken cancellationToken = default)
     {
         using var transaction = c.BeginTransaction();
-        Stats result = Upsert(c, transaction, mails, harvestedAt);
+        Stats result = Upsert(c, transaction, mails, harvestedAt, cancellationToken);
         transaction.Commit();
         return result;
     }
 
     internal static Stats Upsert(SqliteConnection c, SqliteTransaction transaction,
-        IEnumerable<HarvestedMail> mails, string harvestedAt)
+        IEnumerable<HarvestedMail> mails, string harvestedAt,
+        CancellationToken cancellationToken = default)
     {
         int ins = 0, upd = 0;
 
@@ -92,6 +94,7 @@ static class Corpus
 
         foreach (var m in mails)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (string.IsNullOrEmpty(m.EntryId)) continue;
             string storageEntryId = m.EntryId;
             object? existingRid = null;
@@ -164,6 +167,7 @@ static class Corpus
             if (isNew) ins++; else upd++;
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         SetMeta(c, transaction, "last_harvest", harvestedAt);
         return new(ins, upd);
     }
