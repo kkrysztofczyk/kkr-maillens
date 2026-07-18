@@ -97,7 +97,7 @@ run\KKR.MailLens.exe rebuild-content-index
 
 PDF bez użytecznej warstwy tekstowej na co najmniej jednej stronie otrzymuje status `needs-ocr`, po czym Worker automatycznie zleca OCR tych stron. Segmenty tekstowe i OCR są scalane według numeru strony i indeksowane w FTS5. Podczas długiego OCR Worker odnawia dzierżawę zadania po każdej stronie.
 
-`processing-run` uruchamia Workera w Windows Job Object z konfigurowalnym łącznym limitem pamięci, obejmującym także procesy potomne. Ctrl+C i zablokowanie sesji anulują aktywne operacje Gmail/Tesseract/PDF; zadanie wraca do kolejki bez zużycia próby. Bezpośrednie uruchomienie `KKR.MailLens.Worker.exe` omija limit nakładany przez launcher CLI.
+`processing-run` uruchamia Workera z ograniczonym tokenem Windows, na nieinteraktywnym pulpicie i w Job Object z blokadą dostępu do schowka, ustawień interfejsu oraz globalnych uchwytów. Konfigurowalny łączny limit pamięci obejmuje także procesy potomne. Proces jest tworzony jako wstrzymany, ograniczenia są nakładane przed wykonaniem pierwszej instrukcji, a bezpośrednio uruchomiony `KKR.MailLens.Worker.exe` odmawia pracy. Ctrl+C i zablokowanie sesji anulują aktywne operacje Gmail/Tesseract/PDF; zadanie wraca do kolejki bez zużycia próby.
 
 ## Transkrypcja audio i wideo
 

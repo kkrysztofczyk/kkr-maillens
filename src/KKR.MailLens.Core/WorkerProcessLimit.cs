@@ -10,6 +10,14 @@ sealed class WorkerProcessLimit : IDisposable
     const uint JobObjectLimitJobMemory = 0x00000200;
     const uint JobObjectLimitDieOnUnhandledException = 0x00000400;
     const uint JobObjectLimitKillOnJobClose = 0x00002000;
+    const uint JobObjectUiLimitHandles = 0x00000001;
+    const uint JobObjectUiLimitReadClipboard = 0x00000002;
+    const uint JobObjectUiLimitWriteClipboard = 0x00000004;
+    const uint JobObjectUiLimitSystemParameters = 0x00000008;
+    const uint JobObjectUiLimitDisplaySettings = 0x00000010;
+    const uint JobObjectUiLimitGlobalAtoms = 0x00000020;
+    const uint JobObjectUiLimitDesktop = 0x00000040;
+    const uint JobObjectUiLimitExitWindows = 0x00000080;
     readonly SafeFileHandle job;
 
     WorkerProcessLimit(SafeFileHandle job) => this.job = job;
@@ -45,6 +53,21 @@ sealed class WorkerProcessLimit : IDisposable
             Marshal.StructureToPtr(information, buffer, fDeleteOld: false);
             if (!SetInformationJobObject(job, 9, buffer, (uint)length)
                 || !AssignProcessToJobObject(job, process.Handle))
+            {
+                error = new Win32Exception(Marshal.GetLastWin32Error()).Message;
+                job.Dispose();
+                return null;
+            }
+            var uiRestrictions = new JobObjectBasicUiRestrictions
+            {
+                UIRestrictionsClass = JobObjectUiLimitHandles | JobObjectUiLimitReadClipboard
+                    | JobObjectUiLimitWriteClipboard | JobObjectUiLimitSystemParameters
+                    | JobObjectUiLimitDisplaySettings | JobObjectUiLimitGlobalAtoms
+                    | JobObjectUiLimitDesktop | JobObjectUiLimitExitWindows,
+            };
+            int uiLength = Marshal.SizeOf<JobObjectBasicUiRestrictions>();
+            Marshal.StructureToPtr(uiRestrictions, buffer, fDeleteOld: false);
+            if (!SetInformationJobObject(job, 4, buffer, (uint)uiLength))
             {
                 error = new Win32Exception(Marshal.GetLastWin32Error()).Message;
                 job.Dispose();
@@ -91,6 +114,12 @@ sealed class WorkerProcessLimit : IDisposable
         public UIntPtr JobMemoryLimit;
         public UIntPtr PeakProcessMemoryUsed;
         public UIntPtr PeakJobMemoryUsed;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct JobObjectBasicUiRestrictions
+    {
+        public uint UIRestrictionsClass;
     }
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]

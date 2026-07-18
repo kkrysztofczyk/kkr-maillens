@@ -62,7 +62,7 @@ run\KKR.MailLens.exe processing-run
 ```
 
 OCR przekazuje obrazy przez pamięć i strumienie procesu, bez jawnego pliku tymczasowego. Worker automatycznie renderuje przez PDFium tylko strony PDF bez użytecznej warstwy tekstowej, wykonuje OCR strona po stronie, scala wynik według numerów stron i aktualizuje indeks FTS5.
-Uruchomienie przez `processing-run` nakłada limit pamięci na Workera i procesy potomne; Ctrl+C lub zablokowanie sesji bezpiecznie zwraca aktywne zadanie do kolejki.
+Uruchomienie przez `processing-run` nakłada ograniczony token Windows, izolację interfejsu Job Object oraz limit pamięci na Workera i procesy potomne. Ograniczenia są aktywne przed wznowieniem procesu, a Worker uruchomiony bez launchera odmawia pracy. Ctrl+C lub zablokowanie sesji bezpiecznie zwraca aktywne zadanie do kolejki.
 
 ## Lokalna transkrypcja
 

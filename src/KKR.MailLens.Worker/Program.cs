@@ -2,6 +2,12 @@ using KKR.MailLens;
 
 SQLitePCL.Batteries_V2.Init();
 
+if (OperatingSystem.IsWindows() && !RestrictedWorkerProcess.IsCurrentProcessRestricted())
+{
+    Console.Error.WriteLine("Worker wymaga uruchomienia przez ograniczony launcher KKR MailLens.");
+    return 4;
+}
+
 string? key = Ipc.Request("GETKEY", 2_000);
 if (string.IsNullOrWhiteSpace(key) || key == "LOCKED")
 {

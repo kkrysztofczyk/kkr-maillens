@@ -242,17 +242,11 @@ sealed class GmailManagerForm : Form
             if (!File.Exists(executable))
                 throw new FileNotFoundException("Brak KKR.MailLens.Worker.exe w katalogu aplikacji.", executable);
 
-            using Process process = Process.Start(new ProcessStartInfo(executable)
-            {
-                UseShellExecute = false,
-                Arguments = "--drain",
-            }) ?? throw new InvalidOperationException("Nie uruchomiono Workera.");
             int memoryLimitMb = Math.Clamp(AppConfig.Load().WorkerMemoryLimitMb, 256, 16_384);
-            using WorkerProcessLimit? limit = WorkerProcessLimit.TryAttach(process,
-                memoryLimitMb * 1024L * 1024L, out string? limitError);
-            if (limit is null && limitError is not null) Log("UWAGA: brak limitu pamięci Workera: " + limitError);
-            await process.WaitForExitAsync(cancellationToken);
-            return $"Worker zakończył działanie z kodem {process.ExitCode}.";
+            using RestrictedWorkerProcess worker = RestrictedWorkerProcess.Start(executable, "--drain",
+                memoryLimitMb * 1024L * 1024L);
+            await worker.Process.WaitForExitAsync(cancellationToken);
+            return $"Worker zakończył działanie z kodem {worker.Process.ExitCode}.";
         });
     }
 

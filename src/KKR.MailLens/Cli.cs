@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 namespace KKR.MailLens;
 
 /// <summary>Komendy CLI. Sesje trzyma GUI (klucz w RAM); CLI bierze klucz z agenta przez named-pipe,
@@ -468,20 +470,19 @@ static class Cli
             Console.Error.WriteLine($"Brak workera: {executable}. Opublikuj projekt KKR.MailLens.Worker do tego samego katalogu.");
             return 1;
         }
-        var start = new System.Diagnostics.ProcessStartInfo(executable)
-        {
-            UseShellExecute = false,
-            Arguments = Flag(args, "--once") ? "" : "--drain",
-        };
-        using var process = System.Diagnostics.Process.Start(start);
-        if (process is null) return 1;
         int memoryLimitMb = Math.Clamp(AppConfig.Load().WorkerMemoryLimitMb, 256, 16_384);
-        using WorkerProcessLimit? processLimit = WorkerProcessLimit.TryAttach(process,
-            memoryLimitMb * 1024L * 1024L, out string? limitError);
-        if (processLimit is null && limitError is not null)
-            Console.Error.WriteLine($"UWAGA: nie ustawiono limitu pamięci Workera: {limitError}");
-        process.WaitForExit();
-        return process.ExitCode;
+        try
+        {
+            using RestrictedWorkerProcess worker = RestrictedWorkerProcess.Start(executable,
+                Flag(args, "--once") ? "" : "--drain", memoryLimitMb * 1024L * 1024L);
+            worker.Process.WaitForExit();
+            return worker.Process.ExitCode;
+        }
+        catch (Exception ex) when (ex is Win32Exception or PlatformNotSupportedException)
+        {
+            Console.Error.WriteLine($"Nie uruchomiono ograniczonego Workera: {ex.Message}");
+            return 1;
+        }
     }
 
     static int AccountHelp()

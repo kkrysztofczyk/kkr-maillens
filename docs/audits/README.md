@@ -34,7 +34,8 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - OpenXML ma limity liczby wpisów, rozmiaru po rozwinięciu i współczynnika kompresji oraz odrzuca niebezpieczne ścieżki archiwum.
 - Nieobsługiwane typy kończą się statusem `skipped`, bez trzech bezcelowych prób i szumu w `failed`.
 - Testy regresyjne obejmują przekroczenie limitu PDF i ekspansji archiwum OpenXML.
-- Worker uruchamiany przez CLI działa w Windows Job Object z łącznym limitem pamięci obejmującym procesy potomne.
+- Worker jest tworzony jako wstrzymany z ograniczonym tokenem Windows, po czym przed wznowieniem trafia do Job Object z limitami interfejsu i łącznym limitem pamięci obejmującym procesy potomne.
+- Bezpośrednie uruchomienie Workera jest odrzucane, jeżeli proces nie ma ograniczonego tokenu.
 - Ctrl+C i utrata odblokowanej sesji anulują operacje zewnętrzne; zadanie wraca do kolejki bez zużycia próby.
 - Działa lokalny pipeline FFmpeg → whisper.cpp z timestampami segmentów, FTS5 i sprzątaniem jawnych plików roboczych.
 - Garbage collection usuwa wyłącznie bloby bez aktywnych referencji, zachowuje współdzielone bloby i pomija dane używane przez działające zadania.
@@ -44,11 +45,7 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Wyszukiwanie GUI przełącza się między wiadomościami, `content_fts` albo łączy oba rodzaje wyników.
 - IMAP zapisuje locator konto/folder/UIDVALIDITY/UID/część MIME, a Worker pobiera i przetwarza załącznik przez MailKit z limitem pamięci.
 - Outlook zapisuje StoreID/EntryID/indeks załącznika; broker COM działa na dedykowanym STA i sprząta izolowany plaintext workspace.
-- Zestaw testów wzrósł z historycznych 20/31 do 82 testów.
-
-### Otwarte — priorytet
-
-- Rozważyć dalszą izolację uprawnień Workera (osobny ograniczony token/profil); obecnie izolacja obejmuje osobny proces, limit pamięci, limity dokumentów i anulowanie.
+- Zestaw testów wzrósł z historycznych 20/31 do 84 testów.
 
 ### Otwarte — roadmapa
 
