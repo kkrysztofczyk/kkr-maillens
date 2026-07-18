@@ -15,81 +15,112 @@ TimeSpan leaseDuration = TimeSpan.FromMinutes(5);
 using var connection = Db.Open(key, create: false);
 Db.EnsureSchema(connection);
 var store = new EncryptedBlobStore(Paths.BlobsDir, key);
-
-do
+using var shutdown = new CancellationTokenSource();
+int sessionLocked = 0;
+ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
 {
-    if (Ipc.Request("STATUS", 500)?.StartsWith("UNLOCKED ", StringComparison.Ordinal) != true) return 2;
-    ProcessingJob? job = ProcessingJobRepository.LeaseNext(connection, workerId, leaseDuration);
-    if (job is null) break;
-    try
-    {
-        switch (job.JobType)
-        {
-            case "download":
-                await DownloadAsync(connection, store, job, key);
-                break;
-            case "extract":
-                if (job.AttachmentId is null || job.DocumentId is null)
-                    throw new InvalidDataException("Zadanie ekstrakcji nie wskazuje dokumentu i załącznika.");
-                AttachmentExtractionOutcome outcome = AttachmentExtractionProcessor.Process(
-                    connection, store, job.AttachmentId.Value, job.DocumentId.Value);
-                if (outcome.Status == "needs-ocr" && (outcome.DetectedMimeType == "application/pdf"
-                    || outcome.DetectedMimeType.StartsWith("image/", StringComparison.Ordinal)))
-                    ProcessingJobRepository.Enqueue(connection, "ocr", job.AttachmentId.Value, job.DocumentId.Value);
-                break;
-            case "ocr":
-                if (job.AttachmentId is null || job.DocumentId is null)
-                    throw new InvalidDataException("Zadanie OCR nie wskazuje dokumentu i załącznika.");
-                AppConfig config = AppConfig.Load();
-                int ocrTimeoutSeconds = Math.Clamp(config.OcrTimeoutSeconds, 10, 3600);
-                int renderTimeoutSeconds = Math.Clamp(config.OcrPdfRenderTimeoutSeconds, 10, 3600);
-                TimeSpan ocrLeaseDuration = TimeSpan.FromSeconds(
-                    Math.Max(ocrTimeoutSeconds, renderTimeoutSeconds) + 60);
-                if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, ocrLeaseDuration))
-                    throw new InvalidOperationException("Worker utracił lease zadania OCR.");
-                await OcrAttachmentProcessor.ProcessAsync(connection, store, job.AttachmentId.Value,
-                    job.DocumentId.Value, new TesseractOptions(config.TesseractPath, config.OcrLanguages,
-                        TimeSpan.FromSeconds(ocrTimeoutSeconds)), CancellationToken.None,
-                    pdfOptions: new PdfRenderOptions(
-                        Math.Clamp(config.OcrPdfDpi, 72, 600),
-                        Math.Clamp(config.OcrMaxPdfPages, 1, 10_000),
-                        TimeSpan.FromSeconds(renderTimeoutSeconds)),
-                    heartbeat: () =>
-                    {
-                        if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, ocrLeaseDuration))
-                            throw new InvalidOperationException("Worker utracił lease zadania OCR.");
-                    });
-                break;
-            default:
-                throw new NotSupportedException($"Nieobsługiwany typ zadania: {job.JobType}");
-        }
-        if (!ProcessingJobRepository.Complete(connection, job.Id, workerId))
-        {
-            Console.Error.WriteLine($"lost lease job={job.Id} type={job.JobType}");
-            return 3;
-        }
-        Console.WriteLine($"completed job={job.Id} type={job.JobType}");
-    }
-    catch (Exception ex)
-    {
-        if (!ProcessingJobRepository.Fail(connection, job.Id, workerId, ex.GetType().Name,
-            ex.Message, TimeSpan.FromMinutes(1)))
-        {
-            Console.Error.WriteLine($"lost lease job={job.Id} type={job.JobType}");
-            return 3;
-        }
-        if (job.DocumentId is not null && job.Attempts >= job.MaxAttempts)
-            ContentDocumentRepository.MarkFailed(connection, job.DocumentId.Value, ex.GetType().Name, ex.Message);
-        Console.Error.WriteLine($"failed job={job.Id}: {ex.GetType().Name}");
-        if (!drain) return 1;
-    }
-}
-while (drain);
+    eventArgs.Cancel = true;
+    shutdown.Cancel();
+};
+Console.CancelKeyPress += cancelHandler;
+Task sessionMonitor = MonitorSessionAsync(shutdown, () => Interlocked.Exchange(ref sessionLocked, 1));
 
-return 0;
+try
+{
+    do
+    {
+        if (shutdown.IsCancellationRequested)
+            return Volatile.Read(ref sessionLocked) == 1 ? 2 : 130;
+        ProcessingJob? job = ProcessingJobRepository.LeaseNext(connection, workerId, leaseDuration);
+        if (job is null) break;
+        try
+        {
+            switch (job.JobType)
+            {
+                case "download":
+                    await DownloadAsync(connection, store, job, key, shutdown.Token);
+                    break;
+                case "extract":
+                    if (job.AttachmentId is null || job.DocumentId is null)
+                        throw new InvalidDataException("Zadanie ekstrakcji nie wskazuje dokumentu i załącznika.");
+                    AttachmentExtractionOutcome outcome = AttachmentExtractionProcessor.Process(
+                        connection, store, job.AttachmentId.Value, job.DocumentId.Value);
+                    if (outcome.Status == "needs-ocr" && (outcome.DetectedMimeType == "application/pdf"
+                        || outcome.DetectedMimeType.StartsWith("image/", StringComparison.Ordinal)))
+                        ProcessingJobRepository.Enqueue(connection, "ocr", job.AttachmentId.Value, job.DocumentId.Value);
+                    break;
+                case "ocr":
+                    if (job.AttachmentId is null || job.DocumentId is null)
+                        throw new InvalidDataException("Zadanie OCR nie wskazuje dokumentu i załącznika.");
+                    AppConfig config = AppConfig.Load();
+                    int ocrTimeoutSeconds = Math.Clamp(config.OcrTimeoutSeconds, 10, 3600);
+                    int renderTimeoutSeconds = Math.Clamp(config.OcrPdfRenderTimeoutSeconds, 10, 3600);
+                    TimeSpan ocrLeaseDuration = TimeSpan.FromSeconds(
+                        Math.Max(ocrTimeoutSeconds, renderTimeoutSeconds) + 60);
+                    if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, ocrLeaseDuration))
+                        throw new InvalidOperationException("Worker utracił lease zadania OCR.");
+                    await OcrAttachmentProcessor.ProcessAsync(connection, store, job.AttachmentId.Value,
+                        job.DocumentId.Value, new TesseractOptions(config.TesseractPath, config.OcrLanguages,
+                            TimeSpan.FromSeconds(ocrTimeoutSeconds)), shutdown.Token,
+                        pdfOptions: new PdfRenderOptions(
+                            Math.Clamp(config.OcrPdfDpi, 72, 600),
+                            Math.Clamp(config.OcrMaxPdfPages, 1, 10_000),
+                            TimeSpan.FromSeconds(renderTimeoutSeconds)),
+                        heartbeat: () =>
+                        {
+                            shutdown.Token.ThrowIfCancellationRequested();
+                            if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, ocrLeaseDuration))
+                                throw new InvalidOperationException("Worker utracił lease zadania OCR.");
+                        });
+                    break;
+                default:
+                    throw new NotSupportedException($"Nieobsługiwany typ zadania: {job.JobType}");
+            }
+            shutdown.Token.ThrowIfCancellationRequested();
+            if (!ProcessingJobRepository.Complete(connection, job.Id, workerId))
+            {
+                Console.Error.WriteLine($"lost lease job={job.Id} type={job.JobType}");
+                return 3;
+            }
+            Console.WriteLine($"completed job={job.Id} type={job.JobType}");
+        }
+        catch (OperationCanceledException) when (shutdown.IsCancellationRequested)
+        {
+            if (!ProcessingJobRepository.Abandon(connection, job.Id, workerId))
+            {
+                Console.Error.WriteLine($"lost lease job={job.Id} type={job.JobType}");
+                return 3;
+            }
+            Console.Error.WriteLine($"cancelled job={job.Id} type={job.JobType}");
+            return Volatile.Read(ref sessionLocked) == 1 ? 2 : 130;
+        }
+        catch (Exception ex)
+        {
+            if (!ProcessingJobRepository.Fail(connection, job.Id, workerId, ex.GetType().Name,
+                ex.Message, TimeSpan.FromMinutes(1)))
+            {
+                Console.Error.WriteLine($"lost lease job={job.Id} type={job.JobType}");
+                return 3;
+            }
+            if (job.DocumentId is not null && job.Attempts >= job.MaxAttempts)
+                ContentDocumentRepository.MarkFailed(connection, job.DocumentId.Value, ex.GetType().Name, ex.Message);
+            Console.Error.WriteLine($"failed job={job.Id}: {ex.GetType().Name}");
+            if (!drain) return 1;
+        }
+    }
+    while (drain);
+
+    return 0;
+}
+finally
+{
+    shutdown.Cancel();
+    await sessionMonitor.ConfigureAwait(false);
+    Console.CancelKeyPress -= cancelHandler;
+}
 
 static async Task DownloadAsync(Microsoft.Data.Sqlite.SqliteConnection connection, EncryptedBlobStore store,
-    ProcessingJob job, string sessionKeyHex)
+    ProcessingJob job, string sessionKeyHex, CancellationToken cancellationToken)
 {
     if (job.AttachmentId is null) throw new InvalidDataException("Zadanie pobierania nie wskazuje załącznika.");
     MailAttachmentRepository.Item item = MailAttachmentRepository.Get(connection, job.AttachmentId.Value);
@@ -98,12 +129,12 @@ static async Task DownloadAsync(Microsoft.Data.Sqlite.SqliteConnection connectio
     GmailAccountRecord account = GmailRepository.FindAccount(connection, accountId)
         ?? throw new InvalidOperationException("Konto Gmail nie istnieje.");
     using IGmailApiClient api = await GmailOAuth.CreateApiClientAsync(
-        account, sessionKeyHex, CancellationToken.None);
+        account, sessionKeyHex, cancellationToken);
     var attachment = new GmailAttachmentRecord(item.PartId,
         item.ProviderAttachmentKey.StartsWith("part:", StringComparison.Ordinal) ? "" : item.ProviderAttachmentKey,
         item.InlineBase64Data, item.Filename, item.MimeType, item.SizeBytes, item.ContentId, item.IsInline);
     DownloadedAttachment downloaded = await GmailAttachmentDownloader.DownloadAsync(
-        api, item.ProviderMessageKey, attachment, cancellationToken: CancellationToken.None);
+        api, item.ProviderMessageKey, attachment, cancellationToken: cancellationToken);
     try
     {
         StoredBlob blob = store.Put(connection, downloaded.Bytes);
@@ -116,6 +147,31 @@ static async Task DownloadAsync(Microsoft.Data.Sqlite.SqliteConnection connectio
     {
         System.Security.Cryptography.CryptographicOperations.ZeroMemory(downloaded.Bytes);
     }
+}
+
+static async Task MonitorSessionAsync(CancellationTokenSource shutdown, Action onLocked)
+{
+    int missedResponses = 0;
+    try
+    {
+        while (true)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1), shutdown.Token).ConfigureAwait(false);
+            string? status = Ipc.Request("STATUS", 500);
+            if (status?.StartsWith("UNLOCKED ", StringComparison.Ordinal) == true)
+            {
+                missedResponses = 0;
+                continue;
+            }
+            if (status?.StartsWith("LOCKED", StringComparison.Ordinal) == true || ++missedResponses >= 3)
+            {
+                onLocked();
+                shutdown.Cancel();
+                return;
+            }
+        }
+    }
+    catch (OperationCanceledException) when (shutdown.IsCancellationRequested) { }
 }
 
 static long ParseGmailAccountId(string entryId)

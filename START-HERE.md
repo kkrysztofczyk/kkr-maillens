@@ -51,11 +51,12 @@ Neutralny rekord testowy ma temat `Test Record`, nadawcę `sender@example.invali
 TXT/HTML/PDF/DOCX/XLSX/PPTX są ekstrahowane przez osobny proces Worker, a pliki źródłowe pozostają w zaszyfrowanym magazynie. Dla obrazów PNG/JPEG/TIFF/BMP oraz skanowanych PDF-ów można skonfigurować lokalny Tesseract 5:
 
 ```powershell
-run\KKR.MailLens.exe config --tesseract "C:\Program Files\Tesseract-OCR\tesseract.exe" --ocr-languages pol+eng --ocr-pdf-dpi 300 --ocr-max-pdf-pages 100
+run\KKR.MailLens.exe config --tesseract "C:\Program Files\Tesseract-OCR\tesseract.exe" --ocr-languages pol+eng --ocr-pdf-dpi 300 --ocr-max-pdf-pages 100 --worker-memory-mb 1536
 run\KKR.MailLens.exe processing-run
 ```
 
 OCR przekazuje obrazy przez pamięć i strumienie procesu, bez jawnego pliku tymczasowego. Worker automatycznie renderuje przez PDFium tylko strony PDF bez użytecznej warstwy tekstowej, wykonuje OCR strona po stronie, scala wynik według numerów stron i aktualizuje indeks FTS5.
+Uruchomienie przez `processing-run` nakłada limit pamięci na Workera i procesy potomne; Ctrl+C lub zablokowanie sesji bezpiecznie zwraca aktywne zadanie do kolejki.
 
 Aktualny status funkcji oraz ustaleń bezpieczeństwa znajduje się w [indeksie audytów](docs/audits/README.md).
 

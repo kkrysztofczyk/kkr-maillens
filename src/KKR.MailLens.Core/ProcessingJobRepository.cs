@@ -131,6 +131,18 @@ static class ProcessingJobRepository
             ("$message", message), ("$now", Stamp(now)), ("$worker", workerId), ("$id", id)) == 1;
     }
 
+    public static bool Abandon(SqliteConnection connection, long id, string workerId,
+        DateTimeOffset? clock = null)
+    {
+        ValidateWorker(workerId);
+        DateTimeOffset now = clock ?? DateTimeOffset.UtcNow;
+        return ExecuteCount(connection, null, """
+            UPDATE processing_jobs SET status='pending',attempts=MAX(0,attempts-1),available_at=$now,
+                locked_by=NULL,locked_at=NULL,lease_until=NULL,error_code=NULL,error_message=NULL
+            WHERE id=$id AND status='running' AND locked_by=$worker;
+            """, ("$now", Stamp(now)), ("$worker", workerId), ("$id", id)) == 1;
+    }
+
     static void RecoverExpired(SqliteConnection connection, SqliteTransaction transaction, DateTimeOffset now)
     {
         Execute(connection, transaction, """

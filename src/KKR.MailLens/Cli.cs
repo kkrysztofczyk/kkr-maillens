@@ -57,6 +57,9 @@ static class Cli
         if (GetStr(args, "--ocr-pdf-render-timeout") is { } renderTimeout
             && int.TryParse(renderTimeout, out int renderSeconds))
         { cfg.OcrPdfRenderTimeoutSeconds = Math.Clamp(renderSeconds, 10, 3600); changed = true; }
+        if (GetStr(args, "--worker-memory-mb") is { } workerMemory
+            && int.TryParse(workerMemory, out int memoryMb))
+        { cfg.WorkerMemoryLimitMb = Math.Clamp(memoryMb, 256, 16_384); changed = true; }
         if (changed) { cfg.Save(); Console.WriteLine($"Zapisano config: {Paths.ConfigFile}"); }
 
         Console.WriteLine($"Katalog danych: {Paths.Base}");
@@ -65,7 +68,8 @@ static class Cli
         Console.WriteLine($"Tesseract    : {cfg.TesseractPath}");
         Console.WriteLine($"OCR          : {cfg.OcrLanguages}, timeout {cfg.OcrTimeoutSeconds} s");
         Console.WriteLine($"OCR PDF      : {cfg.OcrPdfDpi} DPI, max {cfg.OcrMaxPdfPages} stron, render timeout {cfg.OcrPdfRenderTimeoutSeconds} s/strona");
-        if (!changed) Console.WriteLine("Zmiana: config [--store <fragment>] [--max N] [--tesseract <sciezka>] [--ocr-languages pol+eng] [--ocr-timeout N] [--ocr-pdf-dpi N] [--ocr-max-pdf-pages N] [--ocr-pdf-render-timeout N]");
+        Console.WriteLine($"Worker       : limit pamięci {cfg.WorkerMemoryLimitMb} MiB");
+        if (!changed) Console.WriteLine("Zmiana: config [--store <fragment>] [--max N] [--tesseract <sciezka>] [--ocr-languages pol+eng] [--ocr-timeout N] [--ocr-pdf-dpi N] [--ocr-max-pdf-pages N] [--ocr-pdf-render-timeout N] [--worker-memory-mb N]");
         return 0;
     }
 
@@ -440,6 +444,11 @@ static class Cli
         };
         using var process = System.Diagnostics.Process.Start(start);
         if (process is null) return 1;
+        int memoryLimitMb = Math.Clamp(AppConfig.Load().WorkerMemoryLimitMb, 256, 16_384);
+        using WorkerProcessLimit? processLimit = WorkerProcessLimit.TryAttach(process,
+            memoryLimitMb * 1024L * 1024L, out string? limitError);
+        if (processLimit is null && limitError is not null)
+            Console.Error.WriteLine($"UWAGA: nie ustawiono limitu pamięci Workera: {limitError}");
         process.WaitForExit();
         return process.ExitCode;
     }
@@ -519,7 +528,7 @@ static class Cli
               lock                                 zablokuj sesje GUI (usun klucz z RAM)
               config [--store <fragm>] [--max <N>] [--tesseract <sciezka>] [--ocr-languages pol+eng]
                      [--ocr-timeout N] [--ocr-pdf-dpi N] [--ocr-max-pdf-pages N]
-                     [--ocr-pdf-render-timeout N]
+                     [--ocr-pdf-render-timeout N] [--worker-memory-mb N]
                                                    konfiguracja importu i lokalnego OCR
               harvest [--store <fragm>] [--since yyyy-MM-dd] [--max <N>] [--folders "A,B,C"]
                                                    zbierz foldery do korpusu (store/limit domyslnie z config.json;

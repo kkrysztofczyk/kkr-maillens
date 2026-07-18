@@ -34,17 +34,17 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - OpenXML ma limity liczby wpisów, rozmiaru po rozwinięciu i współczynnika kompresji oraz odrzuca niebezpieczne ścieżki archiwum.
 - Nieobsługiwane typy kończą się statusem `skipped`, bez trzech bezcelowych prób i szumu w `failed`.
 - Testy regresyjne obejmują przekroczenie limitu PDF i ekspansji archiwum OpenXML.
-- Zestaw testów wzrósł z historycznych 20/31 do 66 testów.
+- Worker uruchamiany przez CLI działa w Windows Job Object z łącznym limitem pamięci obejmującym procesy potomne.
+- Ctrl+C i utrata odblokowanej sesji anulują operacje zewnętrzne; zadanie wraca do kolejki bez zużycia próby.
+- Zestaw testów wzrósł z historycznych 20/31 do 67 testów.
 
 ### Otwarte — priorytet
 
-- Utwardzić Worker przetwarzający niezaufane dokumenty: limity zasobów i uprawnień oraz testy złośliwych PDF/OOXML.
+- Rozważyć dalszą izolację uprawnień Workera (osobny ograniczony token/profil); obecnie izolacja obejmuje osobny proces, limit pamięci, limity dokumentów i anulowanie.
 
 ### Otwarte — roadmapa
 
-- Natychmiastowe anulowanie aktywnego zadania po zablokowaniu sesji.
 - Renderowanie stron PDF do OCR w batchach (dziś każdy `RenderAsync` parsuje dokument od nowa).
-- Graceful shutdown workera (`Console.CancelKeyPress` → `CancellationTokenSource`).
 - Garbage collection zaszyfrowanych blobów bez referencji.
 - Testy odbudowy FTS i współdzielonych blobów.
 - Obsługa Gmaila i wyników `content_fts` w GUI.

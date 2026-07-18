@@ -84,13 +84,15 @@ OCR obrazów PNG/JPEG/TIFF/BMP oraz skanowanych stron PDF korzysta z lokalnego T
 Domyślne języki to `pol+eng`, rozdzielczość PDF to 300 DPI, a limit jednego dokumentu wynosi 100 stron wymagających OCR. Ścieżkę, języki, timeouty i limity można ustawić poleceniem:
 
 ```powershell
-run\KKR.MailLens.exe config --tesseract "C:\Program Files\Tesseract-OCR\tesseract.exe" --ocr-languages pol+eng --ocr-timeout 120 --ocr-pdf-dpi 300 --ocr-max-pdf-pages 100 --ocr-pdf-render-timeout 120
+run\KKR.MailLens.exe config --tesseract "C:\Program Files\Tesseract-OCR\tesseract.exe" --ocr-languages pol+eng --ocr-timeout 120 --ocr-pdf-dpi 300 --ocr-max-pdf-pages 100 --ocr-pdf-render-timeout 120 --worker-memory-mb 1536
 run\KKR.MailLens.exe processing-run
 run\KKR.MailLens.exe query-content "neutralny tekst"
 run\KKR.MailLens.exe rebuild-content-index
 ```
 
 PDF bez użytecznej warstwy tekstowej na co najmniej jednej stronie otrzymuje status `needs-ocr`, po czym Worker automatycznie zleca OCR tych stron. Segmenty tekstowe i OCR są scalane według numeru strony i indeksowane w FTS5. Podczas długiego OCR Worker odnawia dzierżawę zadania po każdej stronie.
+
+`processing-run` uruchamia Workera w Windows Job Object z konfigurowalnym łącznym limitem pamięci, obejmującym także procesy potomne. Ctrl+C i zablokowanie sesji anulują aktywne operacje Gmail/Tesseract/PDF; zadanie wraca do kolejki bez zużycia próby. Bezpośrednie uruchomienie `KKR.MailLens.Worker.exe` omija limit nakładany przez launcher CLI.
 
 ## Neutralne dane przykładowe
 

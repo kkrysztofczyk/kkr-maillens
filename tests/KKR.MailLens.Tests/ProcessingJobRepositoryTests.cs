@@ -137,6 +137,23 @@ public sealed class ProcessingJobRepositoryTests
         Assert.AreEqual("worker-2", db.ScalarText("SELECT locked_by FROM processing_jobs WHERE id=" + first.Id + ";"));
     }
 
+    [TestMethod]
+    public void Abandon_ReturnsOwnedJobWithoutConsumingAttempt()
+    {
+        using var db = new TestDatabase();
+        long attachmentId = AddAttachment(db);
+        DateTimeOffset now = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
+        ProcessingJobRepository.Enqueue(db.Connection, "extract", attachmentId, availableAt: now);
+        ProcessingJob job = ProcessingJobRepository.LeaseNext(
+            db.Connection, "worker-1", TimeSpan.FromMinutes(5), now)!;
+
+        Assert.IsFalse(ProcessingJobRepository.Abandon(db.Connection, job.Id, "worker-2", now));
+        Assert.IsTrue(ProcessingJobRepository.Abandon(db.Connection, job.Id, "worker-1", now));
+        ProcessingJob again = ProcessingJobRepository.LeaseNext(
+            db.Connection, "worker-2", TimeSpan.FromMinutes(5), now)!;
+        Assert.AreEqual(1, again.Attempts);
+    }
+
     static long AddAttachment(TestDatabase db)
     {
         GmailAccountRecord account = db.AddAccount();
