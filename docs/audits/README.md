@@ -17,6 +17,7 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Solution ma wspólny projekt Core, osobny Worker oraz brak ręcznie linkowanych plików C#.
 - Migracje są wersjonowane; działają `PRAGMA foreign_keys=ON` i `busy_timeout`.
 - Synchronizacja Gmail zapisuje wspólne `mail_attachments` przez UPSERT i zachowuje stan przetwarzania.
+- Nieudane pobrania pojedynczych wiadomości Gmail są zapisywane w trwałej kolejce retry i odtwarzane po przesunięciu checkpointu historii.
 - Synchronizacja produkuje zadania `download`; Worker wykonuje `download`, `extract` i `ocr`.
 - Aktywne zadania dokumentowe są deduplikowane indeksem z migracji 007.
 - Działa szyfrowany i deduplikowany blob store, ekstrakcja dokumentów, segmenty oraz `content_fts`.
@@ -55,9 +56,11 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Wyszukiwanie GUI przełącza się między wiadomościami, `content_fts` albo łączy oba rodzaje wyników.
 - IMAP zapisuje locator konto/folder/UIDVALIDITY/UID/część MIME, a Worker pobiera i przetwarza załącznik przez MailKit z limitem pamięci.
 - Outlook zapisuje StoreID/EntryID/indeks załącznika; broker COM działa na dedykowanym STA i sprząta izolowany plaintext workspace.
+- Tożsamość wiadomości IMAP i Outlook jest skrótem stabilnego locatora providera; jednakowe `Message-ID` na różnych kontach i jednakowe `EntryID` w różnych store'ach nie kolidują, a stare rekordy są przejmowane bez zmiany ich kluczy obcych.
 - Opcjonalne lokalne embeddingi są zapisywane w SQLCipher, automatycznie kolejkują się po przetworzeniu dokumentu i zasilają osobny ranking semantyczny lub hybrydowy FTS5 + RRF.
 - Transkrypcja może użyć drugiego lokalnego modelu whisper.cpp wyłącznie po pustym wyniku modelu podstawowego; ponownie wykorzystuje ten sam WAV i zapisuje faktycznie użyty model.
-- Endpoint embeddingów jest ograniczony do loopback i nie używa systemowego proxy; tekst OCR i transkrypcji nie jest modyfikowany przez model.
+- Endpoint embeddingów jest ograniczony do loopback, nie używa systemowego proxy i nie podąża za przekierowaniami; tekst OCR i transkrypcji nie jest modyfikowany przez model.
 - Powtarzanie metadanych wiadomości przy segmentach FTS5 pozostaje świadomym kompromisem bieżącego schematu; daje prosty, odtwarzalny ranking kosztem większego indeksu.
 - Polityka uwierzytelnienia pozostaje jawna: niepusty PIN jest dozwolony dla zgodności, a dokumentacja zaleca długą frazę lub `PIN + YubiKey`; gest dotyku zależy od konfiguracji slotu urządzenia.
-- Zestaw testów wzrósł z historycznych 20/31 do 99 testów.
+- CLI przyjmuje PIN i hasło IMAP wyłącznie interaktywnie albo przez `stdin`; test YubiKey używa losowego wyzwania i nie wypisuje odpowiedzi, a konto Gmail jest utrwalane dopiero po potwierdzeniu refresh tokenu OAuth.
+- Zestaw testów wzrósł z historycznych 20/31 do 118 testów.
