@@ -52,7 +52,7 @@ sealed class OllamaEmbeddingProvider : IEmbeddingProvider
         Model = options.Model.Trim();
         if (handler is null)
         {
-            handler = new SocketsHttpHandler { UseProxy = false };
+            handler = CreateDefaultHandler();
             ownsClient = true;
         }
         client = new HttpClient(handler, disposeHandler: ownsClient)
@@ -61,6 +61,12 @@ sealed class OllamaEmbeddingProvider : IEmbeddingProvider
             MaxResponseContentBufferSize = MaxResponseBytes,
         };
     }
+
+    internal static SocketsHttpHandler CreateDefaultHandler() => new()
+    {
+        UseProxy = false,
+        AllowAutoRedirect = false,
+    };
 
     public async Task<IReadOnlyList<float[]>> EmbedAsync(IReadOnlyList<string> inputs,
         CancellationToken cancellationToken = default)

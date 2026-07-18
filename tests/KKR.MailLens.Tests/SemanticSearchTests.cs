@@ -8,6 +8,15 @@ namespace KKR.MailLens.Tests;
 public sealed class SemanticSearchTests
 {
     [TestMethod]
+    public void OllamaTransport_DoesNotFollowRedirectsOrUseProxy()
+    {
+        using SocketsHttpHandler handler = OllamaEmbeddingProvider.CreateDefaultHandler();
+
+        Assert.IsFalse(handler.AllowAutoRedirect);
+        Assert.IsFalse(handler.UseProxy);
+    }
+
+    [TestMethod]
     public void OllamaOptions_RejectNonLoopbackEndpoint()
     {
         Assert.Throws<ArgumentException>(() =>
