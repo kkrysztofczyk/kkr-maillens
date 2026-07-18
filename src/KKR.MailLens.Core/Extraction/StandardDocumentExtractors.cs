@@ -15,10 +15,33 @@ sealed class PdfTextExtractor : IContentExtractor
     {
         ExtractionLimits.Validate(file, options);
         using PdfDocument document = PdfDocument.Open(file.Content);
-        var segments = document.GetPages()
-            .Select(page => new SegmentDraft(page.Text, PageNumber: page.Number))
+        var pages = document.GetPages()
+            .Select(page => (page.Number, page.Text))
             .ToArray();
-        return ExtractionResultBuilder.Build(file.MimeType, segments, options);
+        ExtractionResult result = ExtractionResultBuilder.Build(file.MimeType,
+            pages.Select(page => new SegmentDraft(page.Text, PageNumber: page.Number)), options);
+        return result with
+        {
+            OcrPageNumbers = pages
+                .Where(page => PdfTextQuality.NeedsOcr(page.Text))
+                .Select(page => page.Number)
+                .ToArray(),
+        };
+    }
+}
+
+static class PdfTextQuality
+{
+    const int MinimumAlphaNumericCharacters = 30;
+
+    public static bool NeedsOcr(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return true;
+        string clean = TextNormalizer.Normalize(text);
+        int alphaNumeric = clean.Count(char.IsLetterOrDigit);
+        int replacementCharacters = clean.Count(character => character == '\uFFFD');
+        return alphaNumeric < MinimumAlphaNumericCharacters
+            || replacementCharacters > Math.Max(2, clean.Length / 20);
     }
 }
 

@@ -8,7 +8,7 @@ KKR MailLens tworzy lokalny, szyfrowany indeks poczty do wyszukiwania pełnoteks
 - .NET 9 Desktop Runtime do uruchomienia; SDK 9.0.316 do budowania i testów
 - źródło desktopowe obsługiwane przez integrację COM, konto IMAP albo konto Gmail połączone przez OAuth 2.0
 - opcjonalny sprzętowy drugi składnik uwierzytelnienia
-- opcjonalnie Tesseract 5 z danymi językowymi `pol` i `eng` do lokalnego OCR obrazów
+- opcjonalnie Tesseract 5 z danymi językowymi `pol` i `eng` do lokalnego OCR obrazów i skanowanych PDF-ów
 
 ## Build
 
@@ -71,16 +71,18 @@ Pierwszy import jest stronicowany i zapamiętuje checkpoint. Kolejne uruchomieni
 
 Worker pobiera załączniki Gmaila do deduplikowanego magazynu szyfrowanego AES-GCM. Jawna zawartość jest odszyfrowywana wyłącznie w pamięci procesu. Obsługiwane ekstraktory deterministyczne obejmują TXT/CSV/XML/JSON, HTML, PDF z warstwą tekstową oraz DOCX/XLSX/PPTX. Segmenty zachowują odpowiednio numer strony, slajdu lub nazwę arkusza i trafiają do osobnego indeksu FTS5.
 
-OCR obrazów PNG/JPEG/TIFF/BMP korzysta z lokalnego Tesseracta przez `stdin`/`stdout`, bez tworzenia jawnego pliku tymczasowego. Domyślne języki to `pol+eng`; ścieżkę, języki i timeout można ustawić poleceniem:
+OCR obrazów PNG/JPEG/TIFF/BMP oraz skanowanych stron PDF korzysta z lokalnego Tesseracta przez `stdin`/`stdout`, bez tworzenia jawnego pliku tymczasowego. PDF jest analizowany strona po stronie: zachowywany jest poprawny tekst istniejący, a przez PDFium renderowane są wyłącznie strony puste lub zawierające zbyt mało użytecznego tekstu. Obrazy PNG stron pozostają tylko w pamięci i są zerowane po OCR.
+
+Domyślne języki to `pol+eng`, rozdzielczość PDF to 300 DPI, a limit jednego dokumentu wynosi 100 stron wymagających OCR. Ścieżkę, języki, timeouty i limity można ustawić poleceniem:
 
 ```powershell
-run\KKR.MailLens.exe config --tesseract "C:\Program Files\Tesseract-OCR\tesseract.exe" --ocr-languages pol+eng --ocr-timeout 120
+run\KKR.MailLens.exe config --tesseract "C:\Program Files\Tesseract-OCR\tesseract.exe" --ocr-languages pol+eng --ocr-timeout 120 --ocr-pdf-dpi 300 --ocr-max-pdf-pages 100 --ocr-pdf-render-timeout 120
 run\KKR.MailLens.exe processing-run
 run\KKR.MailLens.exe query-content "neutralny tekst"
 run\KKR.MailLens.exe rebuild-content-index
 ```
 
-PDF bez użytecznej warstwy tekstowej otrzymuje status `needs-ocr`. Renderowanie stron skanowanego PDF do obrazów jest kolejnym etapem i nie jest jeszcze wykonywane automatycznie.
+PDF bez użytecznej warstwy tekstowej na co najmniej jednej stronie otrzymuje status `needs-ocr`, po czym Worker automatycznie zleca OCR tych stron. Segmenty tekstowe i OCR są scalane według numeru strony i indeksowane w FTS5. Podczas długiego OCR Worker odnawia dzierżawę zadania po każdej stronie.
 
 ## Neutralne dane przykładowe
 

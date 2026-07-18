@@ -20,7 +20,10 @@ sealed record ExtractionResult(
     string RawText,
     string CleanText,
     bool WasTruncated,
-    IReadOnlyList<ExtractedSegment> Segments);
+    IReadOnlyList<ExtractedSegment> Segments)
+{
+    public IReadOnlyList<int> OcrPageNumbers { get; init; } = [];
+}
 
 sealed record TextExtractionOptions(int MaxBytes = 25 * 1024 * 1024, int MaxCharacters = 2_000_000)
 {

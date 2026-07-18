@@ -67,10 +67,10 @@ run\KKR.MailLens.exe query-content "neutralny tekst"</pre>
 
   <section>
     <h2>Załączniki i OCR</h2>
-    <p>Załączniki są deduplikowane i szyfrowane AES-GCM. Worker obsługuje TXT/HTML/PDF/DOCX/XLSX/PPTX. OCR obrazów PNG/JPEG/TIFF/BMP uruchamia lokalny Tesseract przez strumienie pamięci, bez jawnego pliku tymczasowego.</p>
-    <pre>run\KKR.MailLens.exe config --tesseract "C:\Program Files\Tesseract-OCR\tesseract.exe" --ocr-languages pol+eng
+    <p>Załączniki są deduplikowane i szyfrowane AES-GCM. Worker obsługuje TXT/HTML/PDF/DOCX/XLSX/PPTX. OCR obrazów PNG/JPEG/TIFF/BMP i skanowanych stron PDF uruchamia lokalny Tesseract przez strumienie pamięci, bez jawnego pliku tymczasowego.</p>
+    <pre>run\KKR.MailLens.exe config --tesseract "C:\Program Files\Tesseract-OCR\tesseract.exe" --ocr-languages pol+eng --ocr-pdf-dpi 300 --ocr-max-pdf-pages 100
 run\KKR.MailLens.exe rebuild-content-index</pre>
-    <p>Skanowane PDF-y są oznaczane jako <code>needs-ocr</code>; automatyczne renderowanie ich stron nie jest jeszcze włączone.</p>
+    <p>Worker renderuje przez PDFium tylko strony bez użytecznej warstwy tekstowej, wykonuje OCR strona po stronie i scala wynik według numeru strony przed aktualizacją indeksu FTS5.</p>
   </section>
 
   <section>

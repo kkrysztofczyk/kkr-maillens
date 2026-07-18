@@ -81,7 +81,11 @@ static class ContentDocumentRepository
         string now = DateTimeOffset.UtcNow.ToString("O");
         bool canUseOcr = result.DetectedMimeType == "application/pdf"
             || result.DetectedMimeType.StartsWith("image/", StringComparison.Ordinal);
-        string status = result.CleanText.Length == 0 && canUseOcr ? "needs-ocr" : "completed";
+        bool hasMissingPdfPages = result.DetectedMimeType == "application/pdf"
+            && result.OcrPageNumbers.Count > 0;
+        string status = canUseOcr && (result.CleanText.Length == 0 || hasMissingPdfPages)
+            ? "needs-ocr"
+            : "completed";
         using var transaction = connection.BeginTransaction();
         Execute(connection, transaction, "DELETE FROM content_segments WHERE document_id=$id;", ("$id", documentId));
         foreach (ExtractedSegment segment in result.Segments)

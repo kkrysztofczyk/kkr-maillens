@@ -55,6 +55,26 @@ public sealed class ProcessingJobRepositoryTests
         Assert.AreEqual("lease-expired", db.ScalarText("SELECT error_code FROM processing_jobs WHERE job_type='extract';"));
     }
 
+    [TestMethod]
+    public void RenewLease_ExtendsOnlyLeaseOwnedByWorker()
+    {
+        using var db = new TestDatabase();
+        long attachmentId = AddAttachment(db);
+        DateTimeOffset now = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        ProcessingJobRepository.Enqueue(db.Connection, "ocr", attachmentId, priority: 10, availableAt: now);
+        ProcessingJobRepository.LeaseNext(db.Connection, "worker-1", TimeSpan.FromMinutes(1), now);
+
+        Assert.IsFalse(ProcessingJobRepository.RenewLease(db.Connection,
+            db.ScalarLong("SELECT id FROM processing_jobs WHERE job_type='ocr';"),
+            "worker-2", TimeSpan.FromMinutes(5), now.AddSeconds(30)));
+        Assert.IsTrue(ProcessingJobRepository.RenewLease(db.Connection,
+            db.ScalarLong("SELECT id FROM processing_jobs WHERE job_type='ocr';"),
+            "worker-1", TimeSpan.FromMinutes(5), now.AddSeconds(30)));
+
+        Assert.IsNull(ProcessingJobRepository.LeaseNext(
+            db.Connection, "worker-2", TimeSpan.FromMinutes(1), now.AddMinutes(2)));
+    }
+
     static long AddAttachment(TestDatabase db)
     {
         GmailAccountRecord account = db.AddAccount();

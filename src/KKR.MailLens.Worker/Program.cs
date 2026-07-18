@@ -11,6 +11,7 @@ if (string.IsNullOrWhiteSpace(key) || key == "LOCKED")
 
 bool drain = args.Contains("--drain", StringComparer.OrdinalIgnoreCase);
 string workerId = $"{Environment.MachineName}:{Environment.ProcessId}";
+TimeSpan leaseDuration = TimeSpan.FromMinutes(5);
 using var connection = Db.Open(key, create: false);
 Db.EnsureSchema(connection);
 var store = new EncryptedBlobStore(Paths.BlobsDir, key);
@@ -18,7 +19,7 @@ var store = new EncryptedBlobStore(Paths.BlobsDir, key);
 do
 {
     if (Ipc.Request("STATUS", 500)?.StartsWith("UNLOCKED ", StringComparison.Ordinal) != true) return 2;
-    ProcessingJob? job = ProcessingJobRepository.LeaseNext(connection, workerId, TimeSpan.FromMinutes(5));
+    ProcessingJob? job = ProcessingJobRepository.LeaseNext(connection, workerId, leaseDuration);
     if (job is null) break;
     try
     {
@@ -32,16 +33,32 @@ do
                     throw new InvalidDataException("Zadanie ekstrakcji nie wskazuje dokumentu i załącznika.");
                 AttachmentExtractionOutcome outcome = AttachmentExtractionProcessor.Process(
                     connection, store, job.AttachmentId.Value, job.DocumentId.Value);
-                if (outcome.Status == "needs-ocr" && outcome.DetectedMimeType.StartsWith("image/", StringComparison.Ordinal))
+                if (outcome.Status == "needs-ocr" && (outcome.DetectedMimeType == "application/pdf"
+                    || outcome.DetectedMimeType.StartsWith("image/", StringComparison.Ordinal)))
                     ProcessingJobRepository.Enqueue(connection, "ocr", job.AttachmentId.Value, job.DocumentId.Value);
                 break;
             case "ocr":
                 if (job.AttachmentId is null || job.DocumentId is null)
                     throw new InvalidDataException("Zadanie OCR nie wskazuje dokumentu i załącznika.");
                 AppConfig config = AppConfig.Load();
+                int ocrTimeoutSeconds = Math.Clamp(config.OcrTimeoutSeconds, 10, 3600);
+                int renderTimeoutSeconds = Math.Clamp(config.OcrPdfRenderTimeoutSeconds, 10, 3600);
+                TimeSpan ocrLeaseDuration = TimeSpan.FromSeconds(
+                    Math.Max(ocrTimeoutSeconds, renderTimeoutSeconds) + 60);
+                if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, ocrLeaseDuration))
+                    throw new InvalidOperationException("Worker utracił lease zadania OCR.");
                 await OcrAttachmentProcessor.ProcessAsync(connection, store, job.AttachmentId.Value,
                     job.DocumentId.Value, new TesseractOptions(config.TesseractPath, config.OcrLanguages,
-                        TimeSpan.FromSeconds(Math.Clamp(config.OcrTimeoutSeconds, 10, 3600))), CancellationToken.None);
+                        TimeSpan.FromSeconds(ocrTimeoutSeconds)), CancellationToken.None,
+                    pdfOptions: new PdfRenderOptions(
+                        Math.Clamp(config.OcrPdfDpi, 72, 600),
+                        Math.Clamp(config.OcrMaxPdfPages, 1, 10_000),
+                        TimeSpan.FromSeconds(renderTimeoutSeconds)),
+                    heartbeat: () =>
+                    {
+                        if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, ocrLeaseDuration))
+                            throw new InvalidOperationException("Worker utracił lease zadania OCR.");
+                    });
                 break;
             default:
                 throw new NotSupportedException($"Nieobsługiwany typ zadania: {job.JobType}");

@@ -16,6 +16,9 @@ sealed class AppConfig
     public string TesseractPath { get; set; } = "tesseract.exe";
     public string OcrLanguages { get; set; } = "pol+eng";
     public int OcrTimeoutSeconds { get; set; } = 120;
+    public int OcrPdfDpi { get; set; } = 300;
+    public int OcrMaxPdfPages { get; set; } = 100;
+    public int OcrPdfRenderTimeoutSeconds { get; set; } = 120;
 
     /// <summary>Efektywny cap dla skanera (&lt;=0 traktujemy jako "bez limitu"). Nie serializowane.</summary>
     [JsonIgnore]

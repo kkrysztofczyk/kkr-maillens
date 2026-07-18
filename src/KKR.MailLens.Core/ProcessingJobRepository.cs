@@ -90,6 +90,24 @@ static class ProcessingJobRepository
             """, ("$now", Stamp(DateTimeOffset.UtcNow)), ("$id", id));
     }
 
+    public static bool RenewLease(SqliteConnection connection, long id, string workerId,
+        TimeSpan leaseDuration, DateTimeOffset? clock = null)
+    {
+        if (string.IsNullOrWhiteSpace(workerId))
+            throw new ArgumentException("Brak identyfikatora workera.", nameof(workerId));
+        if (leaseDuration <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(leaseDuration));
+        DateTimeOffset now = clock ?? DateTimeOffset.UtcNow;
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE processing_jobs SET lease_until=$lease
+            WHERE id=$id AND status='running' AND locked_by=$worker;
+            """;
+        command.Parameters.AddWithValue("$lease", Stamp(now.Add(leaseDuration)));
+        command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$worker", workerId);
+        return command.ExecuteNonQuery() == 1;
+    }
+
     public static void Fail(SqliteConnection connection, long id, string code, string message,
         TimeSpan retryDelay, DateTimeOffset? clock = null)
     {

@@ -50,6 +50,13 @@ static class Cli
         if (GetStr(args, "--ocr-languages") is { } languages) { cfg.OcrLanguages = languages.Trim(); changed = true; }
         if (GetStr(args, "--ocr-timeout") is { } timeout && int.TryParse(timeout, out int seconds))
         { cfg.OcrTimeoutSeconds = Math.Clamp(seconds, 10, 3600); changed = true; }
+        if (GetStr(args, "--ocr-pdf-dpi") is { } dpi && int.TryParse(dpi, out int dpiValue))
+        { cfg.OcrPdfDpi = Math.Clamp(dpiValue, 72, 600); changed = true; }
+        if (GetStr(args, "--ocr-max-pdf-pages") is { } pages && int.TryParse(pages, out int pageCount))
+        { cfg.OcrMaxPdfPages = Math.Clamp(pageCount, 1, 10_000); changed = true; }
+        if (GetStr(args, "--ocr-pdf-render-timeout") is { } renderTimeout
+            && int.TryParse(renderTimeout, out int renderSeconds))
+        { cfg.OcrPdfRenderTimeoutSeconds = Math.Clamp(renderSeconds, 10, 3600); changed = true; }
         if (changed) { cfg.Save(); Console.WriteLine($"Zapisano config: {Paths.ConfigFile}"); }
 
         Console.WriteLine($"Katalog danych: {Paths.Base}");
@@ -57,7 +64,8 @@ static class Cli
         Console.WriteLine($"max/folder   : {cfg.MaxPerFolder}{(cfg.MaxPerFolder <= 0 ? "  (bez limitu)" : "")}");
         Console.WriteLine($"Tesseract    : {cfg.TesseractPath}");
         Console.WriteLine($"OCR          : {cfg.OcrLanguages}, timeout {cfg.OcrTimeoutSeconds} s");
-        if (!changed) Console.WriteLine("Zmiana: config [--store <fragment>] [--max N] [--tesseract <sciezka>] [--ocr-languages pol+eng] [--ocr-timeout N]");
+        Console.WriteLine($"OCR PDF      : {cfg.OcrPdfDpi} DPI, max {cfg.OcrMaxPdfPages} stron, render timeout {cfg.OcrPdfRenderTimeoutSeconds} s/strona");
+        if (!changed) Console.WriteLine("Zmiana: config [--store <fragment>] [--max N] [--tesseract <sciezka>] [--ocr-languages pol+eng] [--ocr-timeout N] [--ocr-pdf-dpi N] [--ocr-max-pdf-pages N] [--ocr-pdf-render-timeout N]");
         return 0;
     }
 
@@ -502,6 +510,8 @@ static class Cli
               status                               stan sesji (z agenta GUI) + katalog danych
               lock                                 zablokuj sesje GUI (usun klucz z RAM)
               config [--store <fragm>] [--max <N>] [--tesseract <sciezka>] [--ocr-languages pol+eng]
+                     [--ocr-timeout N] [--ocr-pdf-dpi N] [--ocr-max-pdf-pages N]
+                     [--ocr-pdf-render-timeout N]
                                                    konfiguracja importu i lokalnego OCR
               harvest [--store <fragm>] [--since yyyy-MM-dd] [--max <N>] [--folders "A,B,C"]
                                                    zbierz foldery do korpusu (store/limit domyslnie z config.json;
