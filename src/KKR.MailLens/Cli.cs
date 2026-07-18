@@ -505,8 +505,10 @@ static class Cli
                 Console.WriteLine($"    {SemanticLocation(hit)}{hit.Filename}");
                 if (hit.Snippet.Length > 0) Console.WriteLine($"    | {hit.Snippet}");
             }
+            if (result.DimensionMismatch)
+                Console.WriteLine($"UWAGA: wymiary embeddingów nie pasują (indeks: {result.IndexedDimensions}, zapytanie: {result.QueryDimensions}) — uruchom semantic-index --rebuild.");
             if (result.CandidateLimitReached)
-                Console.WriteLine($"UWAGA: ranking semantyczny ograniczono do {config.SemanticMaxCandidates} najnowszych segmentów.");
+                Console.WriteLine($"UWAGA: ranking semantyczny ograniczono do {config.SemanticMaxCandidates} najnowszych segmentów. Zwiększ config --semantic-max-candidates lub zawęź zapytanie.");
             Console.WriteLine(result.Hits.Count == 0
                 ? $"(brak trafień; embeddingi modelu: {result.IndexedVectors})"
                 : $"-- {result.Hits.Count} trafień; embeddingi modelu: {result.IndexedVectors}");

@@ -126,6 +126,77 @@ public sealed class SemanticSearchTests
         Assert.AreEqual(0, db.ScalarLong("SELECT count(*) FROM content_embeddings;"));
     }
 
+    [TestMethod]
+    public async Task Search_ReportsDimensionMismatchInsteadOfCandidateLimit()
+    {
+        using var db = new TestDatabase();
+        AddDocument(db, "a", "record-a.txt", "Pojazd wymaga wymiany akumulatora.");
+        using var indexProvider = new FakeEmbeddingProvider(dimensions: 2);
+        await SemanticIndex.IndexAsync(db.Connection, indexProvider);
+        using var queryProvider = new FakeEmbeddingProvider(dimensions: 3);
+
+        SemanticQueryResult result = await SemanticSearch.SearchAsync(db.Connection, queryProvider,
+            "kwestia zasilania pojazdu", limit: 5, hybrid: false);
+
+        Assert.IsTrue(result.DimensionMismatch);
+        Assert.AreEqual(2, result.IndexedDimensions);
+        Assert.AreEqual(3, result.QueryDimensions);
+        Assert.AreEqual(1, result.IndexedVectors);
+        Assert.IsFalse(result.CandidateLimitReached);
+        Assert.IsEmpty(result.Hits);
+    }
+
+    [TestMethod]
+    public async Task Search_CandidateCapKeepsMostRecentSegmentsAndFlagsTruncation()
+    {
+        using var db = new TestDatabase();
+        AddDocument(db, "a", "record-a.txt", "Pojazd wymaga wymiany akumulatora.");
+        AddDocument(db, "b", "record-b.txt", "Dokument zawiera neutralne sprawozdanie kwartalne.");
+        SetReceived(db, "record-a.txt", "2026-01-01 00:00:00");
+        SetReceived(db, "record-b.txt", "2026-02-01 00:00:00");
+        using var provider = new FakeEmbeddingProvider();
+        await SemanticIndex.IndexAsync(db.Connection, provider);
+
+        SemanticQueryResult result = await SemanticSearch.SearchAsync(db.Connection, provider,
+            "kwestia zasilania pojazdu", limit: 1, hybrid: false, maxCandidates: 1);
+
+        Assert.IsTrue(result.CandidateLimitReached);
+        Assert.IsFalse(result.DimensionMismatch);
+        Assert.HasCount(1, result.Hits);
+        Assert.AreEqual("record-b.txt", result.Hits[0].Hit.Filename);
+    }
+
+    [TestMethod]
+    public async Task Search_StreamingTopKKeepsBestMatchAcrossManyCandidates()
+    {
+        using var db = new TestDatabase();
+        AddDocument(db, "a", "record-a.txt", "Pojazd wymaga wymiany akumulatora.");
+        foreach (string suffix in new[] { "b", "c", "d", "e", "f" })
+            AddDocument(db, suffix, $"record-{suffix}.txt", "Dokument zawiera neutralne sprawozdanie kwartalne.");
+        using var provider = new FakeEmbeddingProvider();
+        await SemanticIndex.IndexAsync(db.Connection, provider);
+
+        SemanticQueryResult result = await SemanticSearch.SearchAsync(db.Connection, provider,
+            "kwestia zasilania pojazdu", limit: 1, hybrid: false);
+
+        Assert.IsFalse(result.CandidateLimitReached);
+        Assert.HasCount(1, result.Hits);
+        Assert.AreEqual("record-a.txt", result.Hits[0].Hit.Filename);
+    }
+
+    static void SetReceived(TestDatabase db, string filename, string received)
+    {
+        using var command = db.Connection.CreateCommand();
+        command.CommandText = """
+            UPDATE mails SET received=$received WHERE entry_id IN
+                (SELECT d.mail_entry_id FROM content_documents d
+                 JOIN mail_attachments a ON a.id=d.attachment_id WHERE a.filename=$filename);
+            """;
+        command.Parameters.AddWithValue("$received", received);
+        command.Parameters.AddWithValue("$filename", filename);
+        Assert.AreEqual(1, command.ExecuteNonQuery());
+    }
+
     static void AddDocument(TestDatabase db, string suffix, string filename, string text)
     {
         GmailAccountRecord account = GmailRepository.FindAccount(db.Connection, 1) ?? db.AddAccount();
@@ -153,7 +224,7 @@ public sealed class SemanticSearchTests
         ContentDocumentRepository.SaveExtraction(db.Connection, documentId, extraction, "plain-text", "1");
     }
 
-    sealed class FakeEmbeddingProvider : IEmbeddingProvider
+    sealed class FakeEmbeddingProvider(int dimensions = 2) : IEmbeddingProvider
     {
         public string Model => "neutral-local-model";
 
@@ -162,10 +233,13 @@ public sealed class SemanticSearchTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             IReadOnlyList<float[]> vectors = inputs.Select(input =>
-                input.Contains("pojazd", StringComparison.OrdinalIgnoreCase)
-                    || input.Contains("akumulator", StringComparison.OrdinalIgnoreCase)
-                    ? new float[] { 1, 0 }
-                    : new float[] { 0, 1 }).ToArray();
+            {
+                var vector = new float[dimensions];
+                bool vehicle = input.Contains("pojazd", StringComparison.OrdinalIgnoreCase)
+                    || input.Contains("akumulator", StringComparison.OrdinalIgnoreCase);
+                vector[vehicle ? 0 : 1] = 1;
+                return vector;
+            }).ToArray();
             return Task.FromResult(vectors);
         }
 

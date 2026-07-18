@@ -235,7 +235,7 @@ static class SemanticIndex
         transaction.Commit();
     }
 
-    static int? ModelDimensions(SqliteConnection connection, string model)
+    public static int? ModelDimensions(SqliteConnection connection, string model)
     {
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT dimensions FROM content_embeddings WHERE model=$model LIMIT 1;";
@@ -291,7 +291,8 @@ static class SemanticIndex
 
 sealed record SemanticSearchHit(ContentSearchHit Hit, double? Similarity, double Score, string Channels);
 sealed record SemanticQueryResult(IReadOnlyList<SemanticSearchHit> Hits, int IndexedVectors,
-    bool CandidateLimitReached);
+    bool CandidateLimitReached, bool DimensionMismatch = false, int? IndexedDimensions = null,
+    int QueryDimensions = 0);
 
 static class SemanticSearch
 {
@@ -307,18 +308,16 @@ static class SemanticSearch
         float[] queryVector = queryVectors.Single();
         Normalize(queryVector);
         int indexed = SemanticIndex.Count(connection, provider.Model);
-        IReadOnlyList<Candidate> candidates = LoadCandidates(connection, provider.Model,
-            queryVector.Length, maxCandidates);
-        List<SemanticSearchHit> semantic = candidates
-            .Select(candidate => (Candidate: candidate, Similarity: Dot(queryVector, candidate.Vector)))
-            .Select(item => new SemanticSearchHit(item.Candidate.Hit,
-                item.Similarity, item.Similarity, "semantic"))
-            .OrderByDescending(hit => hit.Similarity)
-            .ThenByDescending(hit => hit.Hit.Received, StringComparer.Ordinal)
-            .Take(Math.Max(limit * 4, limit))
-            .ToList();
+        int? indexedDimensions = SemanticIndex.ModelDimensions(connection, provider.Model);
+        bool dimensionMismatch = indexedDimensions is not null && indexedDimensions.Value != queryVector.Length;
+        CandidateScan scan = dimensionMismatch
+            ? new CandidateScan([], 0)
+            : ScanCandidates(connection, provider.Model, queryVector, Math.Max(limit * 4, limit), maxCandidates);
+        bool candidateLimitReached = !dimensionMismatch && indexed > scan.Scanned;
+        IReadOnlyList<SemanticSearchHit> semantic = scan.Hits;
         if (!hybrid)
-            return new SemanticQueryResult(semantic.Take(limit).ToArray(), indexed, indexed > candidates.Count);
+            return new SemanticQueryResult(semantic.Take(limit).ToArray(), indexed, candidateLimitReached,
+                dimensionMismatch, indexedDimensions, queryVector.Length);
 
         IReadOnlyList<ContentSearchHit> lexical;
         try { lexical = ContentSearch.Search(connection, query, Math.Max(limit * 4, limit)); }
@@ -350,11 +349,12 @@ static class SemanticSearch
             .Select(item => new SemanticSearchHit(item.Hit, item.Similarity, item.Score,
                 item.Semantic && item.Lexical ? "fts+semantic" : item.Semantic ? "semantic" : "fts"))
             .ToArray();
-        return new SemanticQueryResult(hits, indexed, indexed > candidates.Count);
+        return new SemanticQueryResult(hits, indexed, candidateLimitReached,
+            dimensionMismatch, indexedDimensions, queryVector.Length);
     }
 
-    static IReadOnlyList<Candidate> LoadCandidates(SqliteConnection connection, string model,
-        int dimensions, int limit)
+    static CandidateScan ScanCandidates(SqliteConnection connection, string model,
+        float[] queryVector, int topK, int maxCandidates)
     {
         using var command = connection.CreateCommand();
         command.CommandText = """
@@ -370,23 +370,40 @@ static class SemanticSearch
             ORDER BY m.received DESC,s.id DESC LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$model", model);
-        command.Parameters.AddWithValue("$dimensions", dimensions);
-        command.Parameters.AddWithValue("$limit", limit);
-        var result = new List<Candidate>();
+        command.Parameters.AddWithValue("$dimensions", queryVector.Length);
+        command.Parameters.AddWithValue("$limit", maxCandidates);
+        int vectorBytes = queryVector.Length * sizeof(float);
+        var vector = new float[queryVector.Length];
+        IComparer<(double Similarity, string Received)> ranking =
+            Comparer<(double Similarity, string Received)>.Create((left, right) =>
+            {
+                int bySimilarity = left.Similarity.CompareTo(right.Similarity);
+                return bySimilarity != 0 ? bySimilarity : string.CompareOrdinal(left.Received, right.Received);
+            });
+        var top = new PriorityQueue<SemanticSearchHit, (double Similarity, string Received)>(ranking);
+        int scanned = 0;
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
+            scanned++;
             byte[] bytes = (byte[])reader[12];
-            if (bytes.Length != dimensions * sizeof(float)) continue;
-            var vector = new float[dimensions];
-            Buffer.BlockCopy(bytes, 0, vector, 0, bytes.Length);
-            var hit = new ContentSearchHit(reader.GetInt64(0), Text(reader, 1), Text(reader, 2),
+            if (bytes.Length != vectorBytes) continue;
+            Buffer.BlockCopy(bytes, 0, vector, 0, vectorBytes);
+            (double Similarity, string Received) rank = (Dot(queryVector, vector), Text(reader, 1));
+            if (top.Count == topK && top.TryPeek(out _, out (double, string) weakest)
+                && ranking.Compare(rank, weakest) <= 0)
+                continue;
+            var hit = new ContentSearchHit(reader.GetInt64(0), rank.Received, Text(reader, 2),
                 Text(reader, 3), Text(reader, 4), Text(reader, 5), NullableInt(reader, 6),
                 NullableInt(reader, 7), reader.IsDBNull(8) ? null : reader.GetString(8),
                 NullableLong(reader, 9), NullableLong(reader, 10), Text(reader, 11), 0);
-            result.Add(new Candidate(hit, vector));
+            var candidate = new SemanticSearchHit(hit, rank.Similarity, rank.Similarity, "semantic");
+            if (top.Count == topK) top.EnqueueDequeue(candidate, rank);
+            else top.Enqueue(candidate, rank);
         }
-        return result;
+        var hits = new SemanticSearchHit[top.Count];
+        for (int index = hits.Length - 1; index >= 0; index--) hits[index] = top.Dequeue();
+        return new CandidateScan(hits, scanned);
     }
 
     static double Dot(float[] left, float[] right)
@@ -413,7 +430,7 @@ static class SemanticSearch
     static int? NullableInt(SqliteDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetInt32(ordinal);
     static long? NullableLong(SqliteDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetInt64(ordinal);
 
-    sealed record Candidate(ContentSearchHit Hit, float[] Vector);
+    sealed record CandidateScan(IReadOnlyList<SemanticSearchHit> Hits, int Scanned);
     sealed record FusionEntry(ContentSearchHit Hit, double? Similarity, double Score,
         bool Semantic, bool Lexical);
 }
