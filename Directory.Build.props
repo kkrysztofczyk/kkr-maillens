@@ -4,6 +4,8 @@
     <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
     <PathMap>$(MSBuildThisFileDirectory)=/_/</PathMap>
     <Authors>Krzysztof Krysztofczyk</Authors>
+    <Copyright>Copyright © 2026 Krzysztof Krysztofczyk</Copyright>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/kkrysztofczyk/kkr-maillens</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>

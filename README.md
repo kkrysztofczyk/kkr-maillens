@@ -185,3 +185,9 @@ run\KKR.MailLens.exe help
 ```
 
 Najważniejsze operacje to `init`, `status`, `lock`, `config`, `harvest`, `account`, `gmail`, `processing-run`, `processing-status`, `processing-retry`, `blob-gc`, `query`, `query-content`, `semantic-index`, `query-semantic`, `rebuild-content-index`, `stats`, `analyze`, `analyze-rules`, `reclassify` i `selftest`.
+
+## Licencja
+
+Kod źródłowy i dokumentacja KKR MailLens są udostępniane na warunkach [Apache License 2.0](LICENSE). Informacje wymagane przy redystrybucji znajdują się w pliku [NOTICE](NOTICE).
+
+Nazwa „KKR MailLens”, logo i identyfikacja wizualna nie są udostępniane na warunkach licencji kodu; szczegóły opisuje [TRADEMARKS.md](TRADEMARKS.md). Komponenty zewnętrzne pozostają objęte własnymi licencjami.
