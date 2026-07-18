@@ -17,7 +17,11 @@ Poniższe wartości są neutralnymi placeholderami z domeny `.invalid`:
 ```powershell
 run\KKR.MailLens.exe imap-add --host imap.example.invalid --user sender@example.invalid
 run\KKR.MailLens.exe imap-harvest --account sender@example.invalid --since 2026-01-01
+run\KKR.MailLens.exe processing-run
+run\KKR.MailLens.exe query-content "neutralny tekst"
 ```
+
+Import IMAP zapisuje metadane i trwałe identyfikatory części MIME. Worker pobiera później wyłącznie załącznik, szyfruje go i przekazuje do ekstrakcji, OCR albo transkrypcji.
 
 ## Gmail przez OAuth
 

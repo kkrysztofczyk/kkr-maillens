@@ -11,9 +11,14 @@ sealed class HarvestedMail
     public string? Received, Sent;
     public string SenderName = "", SenderEmail = "", Subject = "", Body = "", Categories = "";
     public string ToRecips = "", CcRecips = "", AttachmentNames = "";
+    public string AttachmentProvider = "", ProviderMessageKey = "";
+    public IReadOnlyList<HarvestedAttachment> Attachments = Array.Empty<HarvestedAttachment>();
     public bool HasAttachments, Unread;
     public int Size;
 }
+
+sealed record HarvestedAttachment(string ProviderAttachmentKey, string PartId, string Filename,
+    string MimeType, long SizeBytes, string ContentId, bool IsInline);
 
 /// <summary>
 /// Wlasciciel polaczenia COM z Outlookiem na dedykowanym watku STA (Outlook Object Model jest

@@ -150,17 +150,12 @@ static async Task DownloadAsync(Microsoft.Data.Sqlite.SqliteConnection connectio
 {
     if (job.AttachmentId is null) throw new InvalidDataException("Zadanie pobierania nie wskazuje załącznika.");
     MailAttachmentRepository.Item item = MailAttachmentRepository.Get(connection, job.AttachmentId.Value);
-    if (item.Provider != "gmail") throw new NotSupportedException($"Nieobsługiwany provider: {item.Provider}");
-    long accountId = ParseGmailAccountId(item.MailEntryId);
-    GmailAccountRecord account = GmailRepository.FindAccount(connection, accountId)
-        ?? throw new InvalidOperationException("Konto Gmail nie istnieje.");
-    using IGmailApiClient api = await GmailOAuth.CreateApiClientAsync(
-        account, sessionKeyHex, cancellationToken);
-    var attachment = new GmailAttachmentRecord(item.PartId,
-        item.ProviderAttachmentKey.StartsWith("part:", StringComparison.Ordinal) ? "" : item.ProviderAttachmentKey,
-        item.InlineBase64Data, item.Filename, item.MimeType, item.SizeBytes, item.ContentId, item.IsInline);
-    DownloadedAttachment downloaded = await GmailAttachmentDownloader.DownloadAsync(
-        api, item.ProviderMessageKey, attachment, cancellationToken: cancellationToken);
+    DownloadedAttachment downloaded = item.Provider switch
+    {
+        "gmail" => await DownloadGmailAsync(connection, item, sessionKeyHex, cancellationToken),
+        "imap" => await DownloadImapAsync(item, sessionKeyHex, cancellationToken),
+        _ => throw new NotSupportedException($"Nieobsługiwany provider: {item.Provider}"),
+    };
     try
     {
         StoredBlob blob = store.Put(connection, downloaded.Bytes);
@@ -173,6 +168,33 @@ static async Task DownloadAsync(Microsoft.Data.Sqlite.SqliteConnection connectio
     {
         System.Security.Cryptography.CryptographicOperations.ZeroMemory(downloaded.Bytes);
     }
+}
+
+static async Task<DownloadedAttachment> DownloadGmailAsync(
+    Microsoft.Data.Sqlite.SqliteConnection connection, MailAttachmentRepository.Item item,
+    string sessionKeyHex, CancellationToken cancellationToken)
+{
+    long accountId = ParseGmailAccountId(item.MailEntryId);
+    GmailAccountRecord account = GmailRepository.FindAccount(connection, accountId)
+        ?? throw new InvalidOperationException("Konto Gmail nie istnieje.");
+    using IGmailApiClient api = await GmailOAuth.CreateApiClientAsync(
+        account, sessionKeyHex, cancellationToken);
+    var attachment = new GmailAttachmentRecord(item.PartId,
+        item.ProviderAttachmentKey.StartsWith("part:", StringComparison.Ordinal) ? "" : item.ProviderAttachmentKey,
+        item.InlineBase64Data, item.Filename, item.MimeType, item.SizeBytes, item.ContentId, item.IsInline);
+    DownloadedAttachment downloaded = await GmailAttachmentDownloader.DownloadAsync(
+        api, item.ProviderMessageKey, attachment, cancellationToken: cancellationToken);
+    return downloaded;
+}
+
+static async Task<DownloadedAttachment> DownloadImapAsync(MailAttachmentRepository.Item item,
+    string sessionKeyHex, CancellationToken cancellationToken)
+{
+    ImapMessageLocator locator = ImapMessageLocator.Decode(item.ProviderMessageKey);
+    ImapAccount account = ImapAccounts.Load().Find(locator.AccountName)
+        ?? throw new InvalidOperationException("Konto IMAP nie istnieje w lokalnej konfiguracji.");
+    return await ImapAttachmentDownloader.DownloadAsync(account, sessionKeyHex, item,
+        cancellationToken: cancellationToken);
 }
 
 static async Task MonitorSessionAsync(CancellationTokenSource shutdown, Action onLocked)

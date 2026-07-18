@@ -85,12 +85,12 @@ static class FileTypeDetector
                 return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
             if (archive.Entries.Any(entry => entry.FullName.StartsWith("ppt/", StringComparison.OrdinalIgnoreCase)))
                 return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+            return "application/zip";
         }
         catch (InvalidDataException)
         {
             return null;
         }
-        return null;
     }
 
     static bool LooksLikeMpegAudioFrame(byte[] content)

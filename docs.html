@@ -35,7 +35,7 @@
 
   <section>
     <h2>Stan projektu</h2>
-    <p>Działa synchronizacja Gmail z CLI i GUI, kolejka Workera, szyfrowany magazyn załączników, ekstrakcja dokumentów, OCR obrazów i mieszanych PDF-ów, lokalna transkrypcja FFmpeg/whisper.cpp, osobny indeks FTS5 załączników oraz garbage collection blobów. Załączniki Outlook/IMAP i wyszukiwanie semantyczne pozostają na roadmapie.</p>
+    <p>Działa synchronizacja Gmail z CLI i GUI, kolejka Workera, szyfrowany magazyn załączników Gmail/IMAP, ekstrakcja dokumentów, OCR obrazów i mieszanych PDF-ów, lokalna transkrypcja FFmpeg/whisper.cpp, osobny indeks FTS5 załączników oraz garbage collection blobów. Załączniki Outlook i wyszukiwanie semantyczne pozostają na roadmapie.</p>
   </section>
 
   <section>
@@ -80,7 +80,7 @@ run\KKR.MailLens.exe query-content "neutralny tekst"</pre>
 
   <section>
     <h2>Załączniki i OCR</h2>
-    <p>Załączniki są deduplikowane i szyfrowane AES-GCM. Worker obsługuje TXT/HTML/PDF/DOCX/XLSX/PPTX. OCR obrazów PNG/JPEG/TIFF/BMP i skanowanych stron PDF uruchamia lokalny Tesseract przez strumienie pamięci, bez jawnego pliku tymczasowego.</p>
+    <p>Załączniki Gmail i IMAP są deduplikowane i szyfrowane AES-GCM. Locator IMAP zachowuje konto, folder, UIDVALIDITY, UID oraz część MIME, dlatego Worker nie pobiera ponownie całej wiadomości. Worker obsługuje TXT/HTML/PDF/DOCX/XLSX/PPTX. OCR obrazów PNG/JPEG/TIFF/BMP i skanowanych stron PDF uruchamia lokalny Tesseract przez strumienie pamięci, bez jawnego pliku tymczasowego.</p>
     <pre>run\KKR.MailLens.exe config --tesseract "C:\Program Files\Tesseract-OCR\tesseract.exe" --ocr-languages pol+eng --ocr-pdf-dpi 300 --ocr-max-pdf-pages 100 --worker-memory-mb 1536
 run\KKR.MailLens.exe rebuild-content-index</pre>
     <p>Worker renderuje przez PDFium tylko strony bez użytecznej warstwy tekstowej, wykonuje OCR strona po stronie i scala wynik według numeru strony przed aktualizacją indeksu FTS5. Launcher <code>processing-run</code> nakłada limit pamięci Windows Job Object; Ctrl+C i zablokowanie sesji anulują aktywną operację i zwracają zadanie do kolejki.</p>

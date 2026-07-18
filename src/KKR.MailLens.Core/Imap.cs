@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using System.Text.Json;
 using MailKit;
 using MailKit.Net.Imap;
 using MailKit.Search;
@@ -121,12 +122,21 @@ static class Imap
 
         var fromBox = env != null ? FirstMailbox(env.From) : null;
 
-        // nazwy zalacznikow z BodyStructure (bez pobierania bajtow)
-        var atts = new List<string>();
+        // Metadane i stabilne identyfikatory czesci MIME, bez pobierania bajtow zalacznikow.
+        var attachments = new List<HarvestedAttachment>();
+        int attachmentOrdinal = 0;
         foreach (var a in s.Attachments)
         {
+            attachmentOrdinal++;
+            string partSpecifier = a.PartSpecifier ?? "";
+            if (partSpecifier.Length == 0) continue;
             string? fn = a.ContentDisposition?.FileName ?? a.ContentType?.Name;
-            if (!string.IsNullOrWhiteSpace(fn)) atts.Add(fn!);
+            string filename = string.IsNullOrWhiteSpace(fn) ? $"attachment-{attachmentOrdinal}" : fn;
+            string mimeType = a.ContentType?.MimeType ?? "application/octet-stream";
+            string partLocator = new ImapPartLocator(partSpecifier, a.ContentTransferEncoding ?? "default").Encode();
+            attachments.Add(new HarvestedAttachment(partSpecifier, partLocator, filename, mimeType,
+                a.Octets, a.ContentId ?? "", string.Equals(a.ContentDisposition?.Disposition, "inline",
+                    StringComparison.OrdinalIgnoreCase)));
         }
 
         var when = env?.Date ?? s.InternalDate;
@@ -147,8 +157,11 @@ static class Imap
             Subject = env?.Subject ?? "",
             Body = body,
             Categories = "",
-            HasAttachments = atts.Count > 0,
-            AttachmentNames = string.Join("; ", atts),
+            AttachmentProvider = "imap",
+            ProviderMessageKey = new ImapMessageLocator(acctName, f.FullName, f.UidValidity, s.UniqueId.Id).Encode(),
+            Attachments = attachments,
+            HasAttachments = attachments.Count > 0,
+            AttachmentNames = string.Join("; ", attachments.Select(attachment => attachment.Filename)),
             Size = (int)(s.Size ?? 0),
             Unread = false,
         };
@@ -175,5 +188,45 @@ static class Imap
         t = Regex.Replace(t, "<[^>]+>", " ");
         t = System.Net.WebUtility.HtmlDecode(t);
         return Regex.Replace(t, "\\s+", " ").Trim();
+    }
+}
+
+sealed record ImapMessageLocator(string AccountName, string FolderFullName, uint UidValidity, uint Uid)
+{
+    const int CurrentVersion = 1;
+    sealed record Payload(int Version, string AccountName, string FolderFullName, uint UidValidity, uint Uid);
+
+    public string Encode() => JsonSerializer.Serialize(
+        new Payload(CurrentVersion, AccountName, FolderFullName, UidValidity, Uid));
+
+    public static ImapMessageLocator Decode(string value)
+    {
+        Payload payload;
+        try { payload = JsonSerializer.Deserialize<Payload>(value) ?? throw new JsonException(); }
+        catch (JsonException ex) { throw new InvalidDataException("Nieprawidłowy identyfikator wiadomości IMAP.", ex); }
+        if (payload.Version != CurrentVersion || string.IsNullOrWhiteSpace(payload.AccountName)
+            || string.IsNullOrWhiteSpace(payload.FolderFullName) || payload.UidValidity == 0 || payload.Uid == 0)
+            throw new InvalidDataException("Nieprawidłowy identyfikator wiadomości IMAP.");
+        return new ImapMessageLocator(payload.AccountName, payload.FolderFullName, payload.UidValidity, payload.Uid);
+    }
+}
+
+sealed record ImapPartLocator(string PartSpecifier, string TransferEncoding)
+{
+    const int CurrentVersion = 1;
+    sealed record Payload(int Version, string PartSpecifier, string TransferEncoding);
+
+    public string Encode() => JsonSerializer.Serialize(
+        new Payload(CurrentVersion, PartSpecifier, TransferEncoding));
+
+    public static ImapPartLocator Decode(string value)
+    {
+        Payload payload;
+        try { payload = JsonSerializer.Deserialize<Payload>(value) ?? throw new JsonException(); }
+        catch (JsonException ex) { throw new InvalidDataException("Nieprawidłowy identyfikator części MIME.", ex); }
+        if (payload.Version != CurrentVersion || string.IsNullOrWhiteSpace(payload.PartSpecifier))
+            throw new InvalidDataException("Nieprawidłowy identyfikator części MIME.");
+        return new ImapPartLocator(payload.PartSpecifier,
+            string.IsNullOrWhiteSpace(payload.TransferEncoding) ? "default" : payload.TransferEncoding);
     }
 }

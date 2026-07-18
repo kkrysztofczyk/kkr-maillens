@@ -579,7 +579,7 @@ static class Cli
               imap-add --host H --user <adres> [--name N] [--pass P]
                        [--port P --starttls]          dodaj konto IMAP (haslo chronione przez DPAPI)
               imap-list                            wypisz skonfigurowane konta IMAP
-              imap-harvest [--account N] [--since yyyy-MM-dd] [--max N]   pobierz z IMAP do korpusu
+              imap-harvest [--account N] [--since yyyy-MM-dd] [--max N]   pobierz z IMAP i zakolejkuj zalaczniki
               account add gmail                    polacz konto Gmail przez OAuth 2.0 w systemowej przegladarce
               account list                         wypisz polaczone konta
               account remove <id|adres>             odlacz konto i usun lokalny token OAuth

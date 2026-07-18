@@ -6,7 +6,7 @@ KKR MailLens tworzy lokalny, szyfrowany indeks poczty do wyszukiwania pełnoteks
 
 Aktualnie działa import Outlook/IMAP oraz pełna i przyrostowa synchronizacja Gmail API z CLI i GUI. Pipeline Gmail obejmuje trwałą kolejkę, pobieranie załączników, szyfrowany i deduplikowany magazyn blobów, ekstrakcję TXT/HTML/PDF/DOCX/XLSX/PPTX, lokalny OCR obrazów i mieszanych PDF-ów, transkrypcję audio/wideo przez FFmpeg i whisper.cpp oraz osobny indeks `content_fts`.
 
-Nie są jeszcze dostępne: pobieranie załączników Outlook/IMAP oraz wyszukiwanie semantyczne. Bieżący status ustaleń technicznych znajduje się w [indeksie audytów](docs/audits/README.md).
+Nie są jeszcze dostępne: pobieranie załączników Outlook oraz wyszukiwanie semantyczne. Bieżący status ustaleń technicznych znajduje się w [indeksie audytów](docs/audits/README.md).
 
 ## Wymagania
 
@@ -48,6 +48,8 @@ Przykładowa konfiguracja IMAP używa wyłącznie zarezerwowanej domeny testowej
 ```powershell
 run\KKR.MailLens.exe imap-add --host imap.example.invalid --user sender@example.invalid
 run\KKR.MailLens.exe imap-harvest --account sender@example.invalid --since 2026-01-01
+run\KKR.MailLens.exe processing-run
+run\KKR.MailLens.exe query-content "neutralny tekst"
 ```
 
 ## Gmail API i OAuth 2.0
@@ -78,7 +80,7 @@ Pierwszy import jest stronicowany i zapamiętuje checkpoint. Kolejne uruchomieni
 
 ## Załączniki, ekstrakcja i OCR
 
-Worker pobiera załączniki Gmaila do deduplikowanego magazynu szyfrowanego AES-GCM. Jawna zawartość jest odszyfrowywana wyłącznie w pamięci procesu. Obsługiwane ekstraktory deterministyczne obejmują TXT/CSV/XML/JSON, HTML, PDF z warstwą tekstową oraz DOCX/XLSX/PPTX. Segmenty zachowują odpowiednio numer strony, slajdu lub nazwę arkusza i trafiają do osobnego indeksu FTS5. Archiwa OpenXML podlegają limitom liczby wpisów, rozwiniętego rozmiaru i współczynnika kompresji; typy bez ekstraktora otrzymują status `skipped`.
+Worker pobiera załączniki Gmaila i IMAP do deduplikowanego magazynu szyfrowanego AES-GCM. IMAP zapisuje trwały locator obejmujący konto, folder, `UIDVALIDITY`, UID wiadomości, część MIME i kodowanie transferowe; późniejsze pobranie nie wymaga ponownego pobrania całej wiadomości. Jawna zawartość jest odszyfrowywana wyłącznie w pamięci procesu. Obsługiwane ekstraktory deterministyczne obejmują TXT/CSV/XML/JSON, HTML, PDF z warstwą tekstową oraz DOCX/XLSX/PPTX. Segmenty zachowują odpowiednio numer strony, slajdu lub nazwę arkusza i trafiają do osobnego indeksu FTS5. Archiwa OpenXML podlegają limitom liczby wpisów, rozwiniętego rozmiaru i współczynnika kompresji; typy bez ekstraktora otrzymują status `skipped`.
 
 OCR obrazów PNG/JPEG/TIFF/BMP oraz skanowanych stron PDF korzysta z lokalnego Tesseracta przez `stdin`/`stdout`, bez tworzenia jawnego pliku tymczasowego. PDF jest analizowany strona po stronie: zachowywany jest poprawny tekst istniejący, a przez PDFium renderowane są wyłącznie strony puste lub zawierające zbyt mało użytecznego tekstu. Obrazy PNG stron pozostają tylko w pamięci i są zerowane po OCR.
 

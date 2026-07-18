@@ -108,6 +108,8 @@ static class Corpus
             fRec.Value = m.ToRecips + " " + m.CcRecips;
             ftsIns.ExecuteNonQuery();
 
+            MailAttachmentRepository.UpsertHarvested(c, transaction, m);
+
             if (isNew) ins++; else upd++;
         }
 

@@ -22,13 +22,22 @@ static class GmailAttachmentDownloader
                 ? await api.GetAttachmentBytesAsync(messageId, attachment.GmailAttachmentId, cancellationToken).ConfigureAwait(false)
                 : throw new InvalidDataException("Załącznik Gmail nie zawiera danych ani identyfikatora pobrania.");
 
-        if (bytes.Length == 0) throw new InvalidDataException("Załącznik Gmail jest pusty.");
-        if (bytes.LongLength > maximumBytes) throw new InvalidDataException("Pobrany załącznik przekracza dozwolony limit rozmiaru.");
-        if (attachment.SizeBytes > 0 && bytes.LongLength != attachment.SizeBytes)
-            throw new InvalidDataException("Rozmiar pobranego załącznika nie zgadza się z metadanymi Gmail.");
+        try
+        {
+            if (bytes.Length == 0) throw new InvalidDataException("Załącznik Gmail jest pusty.");
+            if (bytes.LongLength > maximumBytes) throw new InvalidDataException("Pobrany załącznik przekracza dozwolony limit rozmiaru.");
+            if (attachment.SizeBytes > 0 && bytes.LongLength != attachment.SizeBytes)
+                throw new InvalidDataException("Rozmiar pobranego załącznika nie zgadza się z metadanymi Gmail.");
 
-        string sha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-        return new DownloadedAttachment(bytes, sha256, DetectMime(bytes, attachment.MimeType));
+            string sha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+            string detectedMimeType = FileTypeDetector.Detect(attachment.Filename, attachment.MimeType, bytes).MimeType;
+            return new DownloadedAttachment(bytes, sha256, detectedMimeType);
+        }
+        catch
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+            throw;
+        }
     }
 
     public static byte[] DecodeBase64Url(string? value)
@@ -40,12 +49,4 @@ static class GmailAttachmentDownloader
         catch (FormatException ex) { throw new InvalidDataException("Nieprawidłowe dane Base64URL załącznika Gmail.", ex); }
     }
 
-    static string DetectMime(ReadOnlySpan<byte> bytes, string fallback)
-    {
-        if (bytes.StartsWith("%PDF-"u8)) return "application/pdf";
-        if (bytes.Length >= 8 && bytes[..8].SequenceEqual(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A })) return "image/png";
-        if (bytes.Length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) return "image/jpeg";
-        if (bytes.Length >= 4 && bytes[..4].SequenceEqual("PK\u0003\u0004"u8)) return "application/zip";
-        return string.IsNullOrWhiteSpace(fallback) ? "application/octet-stream" : fallback;
-    }
 }
