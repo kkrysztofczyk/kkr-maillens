@@ -116,9 +116,12 @@ static class Imap
     static HarvestedMail MapSummary(IMessageSummary s, string acctName, IMailFolder f, string body, string storeId)
     {
         var env = s.Envelope;
-        string entryId = !string.IsNullOrWhiteSpace(env?.MessageId)
+        string legacyEntryId = !string.IsNullOrWhiteSpace(env?.MessageId)
             ? env!.MessageId!
             : $"imap:{acctName}:{f.FullName}:{s.UniqueId.Id}";
+        string providerMessageKey = new ImapMessageLocator(acctName, f.FullName, f.UidValidity,
+            s.UniqueId.Id).Encode();
+        string sourceIdentity = MailSourceIdentity.Create("imap", providerMessageKey);
 
         var fromBox = env != null ? FirstMailbox(env.From) : null;
 
@@ -143,7 +146,9 @@ static class Imap
         string recv = when is { } w ? w.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss") : "";
         return new HarvestedMail
         {
-            EntryId = entryId,
+            EntryId = sourceIdentity,
+            SourceIdentity = sourceIdentity,
+            LegacyEntryId = legacyEntryId,
             StoreId = storeId,
             FolderPath = $"imap://{acctName}/{f.FullName}",
             FolderLeaf = f.Name,
@@ -158,7 +163,7 @@ static class Imap
             Body = body,
             Categories = "",
             AttachmentProvider = "imap",
-            ProviderMessageKey = new ImapMessageLocator(acctName, f.FullName, f.UidValidity, s.UniqueId.Id).Encode(),
+            ProviderMessageKey = providerMessageKey,
             Attachments = attachments,
             HasAttachments = attachments.Count > 0,
             AttachmentNames = string.Join("; ", attachments.Select(attachment => attachment.Filename)),

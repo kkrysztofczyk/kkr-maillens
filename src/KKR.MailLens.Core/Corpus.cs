@@ -2,8 +2,8 @@ using Microsoft.Data.Sqlite;
 
 namespace KKR.MailLens;
 
-/// <summary>Zapis zebranych maili do zaszyfrowanego korpusu. Upsert po entry_id (zachowuje rowid),
-/// FTS synchronizowane recznie (delete+insert po rowid). Idempotentne - ponowny harvest aktualizuje.</summary>
+/// <summary>Zapis zebranych maili do zaszyfrowanego korpusu. Upsert po stabilnej tożsamości źródłowej
+/// z zachowaniem dotychczasowego entry_id i rowid. FTS synchronizowane ręcznie (delete+insert po rowid).</summary>
 static class Corpus
 {
     public sealed record Stats(int Inserted, int Updated);
@@ -26,16 +26,37 @@ static class Corpus
         exists.CommandText = "SELECT rowid FROM mails WHERE entry_id=$id;";
         var pExId = exists.CreateParameter(); pExId.ParameterName = "$id"; exists.Parameters.Add(pExId);
 
+        using var bySource = c.CreateCommand();
+        bySource.Transaction = transaction;
+        bySource.CommandText = "SELECT rowid,entry_id FROM mails WHERE source_identity=$source;";
+        var pSourceLookup = bySource.CreateParameter(); pSourceLookup.ParameterName = "$source";
+        bySource.Parameters.Add(pSourceLookup);
+
+        using var legacy = c.CreateCommand();
+        legacy.Transaction = transaction;
+        legacy.CommandText = """
+            SELECT rowid,entry_id FROM mails
+            WHERE source_identity IS NULL AND entry_id=$legacy AND store_id=$store
+                AND (folder_path=$folder OR $provider='outlook')
+            LIMIT 1;
+            """;
+        var pLegacyId = legacy.CreateParameter(); pLegacyId.ParameterName = "$legacy"; legacy.Parameters.Add(pLegacyId);
+        var pLegacyStore = legacy.CreateParameter(); pLegacyStore.ParameterName = "$store"; legacy.Parameters.Add(pLegacyStore);
+        var pLegacyFolder = legacy.CreateParameter(); pLegacyFolder.ParameterName = "$folder"; legacy.Parameters.Add(pLegacyFolder);
+        var pLegacyProvider = legacy.CreateParameter(); pLegacyProvider.ParameterName = "$provider";
+        legacy.Parameters.Add(pLegacyProvider);
+
         using var up = c.CreateCommand();
         up.Transaction = transaction;
         up.CommandText = """
-            INSERT INTO mails(entry_id,store_id,folder_path,folder_leaf,conversation_id,received,sent,
+            INSERT INTO mails(entry_id,source_identity,store_id,folder_path,folder_leaf,conversation_id,received,sent,
                 sender_name,sender_email,to_recips,cc_recips,subject,body,has_attachments,attachment_names,
                 size,unread,categories,kind,harvested_at)
-            VALUES($entry_id,$store_id,$folder_path,$folder_leaf,$conversation_id,$received,$sent,
+            VALUES($entry_id,$source_identity,$store_id,$folder_path,$folder_leaf,$conversation_id,$received,$sent,
                 $sender_name,$sender_email,$to_recips,$cc_recips,$subject,$body,$has_attachments,$attachment_names,
                 $size,$unread,$categories,$kind,$harvested_at)
             ON CONFLICT(entry_id) DO UPDATE SET
+                source_identity=COALESCE(excluded.source_identity,mails.source_identity),
                 store_id=excluded.store_id, folder_path=excluded.folder_path, folder_leaf=excluded.folder_leaf,
                 conversation_id=excluded.conversation_id, received=excluded.received, sent=excluded.sent,
                 sender_name=excluded.sender_name, sender_email=excluded.sender_email,
@@ -45,7 +66,7 @@ static class Corpus
                 categories=excluded.categories, kind=excluded.kind, harvested_at=excluded.harvested_at;
             """;
         var p = new Dictionary<string, SqliteParameter>();
-        foreach (var n in new[] { "entry_id","store_id","folder_path","folder_leaf","conversation_id","received","sent",
+        foreach (var n in new[] { "entry_id","source_identity","store_id","folder_path","folder_leaf","conversation_id","received","sent",
             "sender_name","sender_email","to_recips","cc_recips","subject","body","has_attachments","attachment_names",
             "size","unread","categories","kind","harvested_at" })
         { var pp = up.CreateParameter(); pp.ParameterName = "$" + n; up.Parameters.Add(pp); p[n] = pp; }
@@ -72,11 +93,41 @@ static class Corpus
         foreach (var m in mails)
         {
             if (string.IsNullOrEmpty(m.EntryId)) continue;
-            pExId.Value = m.EntryId;
-            object? existingRid = exists.ExecuteScalar();
+            string storageEntryId = m.EntryId;
+            object? existingRid = null;
+            if (!string.IsNullOrWhiteSpace(m.SourceIdentity))
+            {
+                pSourceLookup.Value = m.SourceIdentity;
+                using var sourceReader = bySource.ExecuteReader();
+                if (sourceReader.Read())
+                {
+                    existingRid = sourceReader.GetInt64(0);
+                    storageEntryId = sourceReader.GetString(1);
+                }
+            }
+            if (existingRid is null && !string.IsNullOrWhiteSpace(m.LegacyEntryId))
+            {
+                pLegacyId.Value = m.LegacyEntryId;
+                pLegacyStore.Value = m.StoreId;
+                pLegacyFolder.Value = m.FolderPath;
+                pLegacyProvider.Value = m.AttachmentProvider.Trim().ToLowerInvariant();
+                using var legacyReader = legacy.ExecuteReader();
+                if (legacyReader.Read())
+                {
+                    existingRid = legacyReader.GetInt64(0);
+                    storageEntryId = legacyReader.GetString(1);
+                }
+            }
+            if (existingRid is null)
+            {
+                pExId.Value = storageEntryId;
+                existingRid = exists.ExecuteScalar();
+            }
             bool isNew = existingRid is null or DBNull;
 
-            p["entry_id"].Value = m.EntryId;
+            p["entry_id"].Value = storageEntryId;
+            p["source_identity"].Value = string.IsNullOrWhiteSpace(m.SourceIdentity)
+                ? DBNull.Value : m.SourceIdentity;
             p["store_id"].Value = m.StoreId;
             p["folder_path"].Value = m.FolderPath;
             p["folder_leaf"].Value = m.FolderLeaf;
@@ -108,7 +159,7 @@ static class Corpus
             fRec.Value = m.ToRecips + " " + m.CcRecips;
             ftsIns.ExecuteNonQuery();
 
-            MailAttachmentRepository.UpsertHarvested(c, transaction, m);
+            MailAttachmentRepository.UpsertHarvested(c, transaction, m, storageEntryId);
 
             if (isNew) ins++; else upd++;
         }

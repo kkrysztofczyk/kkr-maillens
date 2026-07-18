@@ -87,7 +87,7 @@ static class MailAttachmentRepository
     }
 
     internal static void UpsertHarvested(SqliteConnection connection, SqliteTransaction transaction,
-        HarvestedMail message)
+        HarvestedMail message, string? persistedMailEntryId = null)
     {
         string provider = message.AttachmentProvider.Trim().ToLowerInvariant();
         if (provider.Length == 0) return;
@@ -95,12 +95,14 @@ static class MailAttachmentRepository
             throw new InvalidDataException("Nieobsługiwany provider załącznika.");
         if (string.IsNullOrWhiteSpace(message.ProviderMessageKey))
             throw new InvalidDataException("Brak identyfikatora wiadomości providera.");
+        string mailEntryId = string.IsNullOrWhiteSpace(persistedMailEntryId)
+            ? message.EntryId : persistedMailEntryId;
 
         string now = DateTimeOffset.UtcNow.ToString("O");
         Execute(connection, transaction, """
             UPDATE mail_attachments SET is_deleted=1,updated_at=$now
             WHERE mail_entry_id=$mail AND provider=$provider;
-            """, ("$mail", message.EntryId), ("$provider", provider), ("$now", now));
+            """, ("$mail", mailEntryId), ("$provider", provider), ("$now", now));
 
         foreach (HarvestedAttachment attachment in message.Attachments)
         {
@@ -132,7 +134,7 @@ static class MailAttachmentRepository
                     is_deleted=0,
                     updated_at=excluded.updated_at
                 RETURNING id,download_status;
-                """, ("$mail", message.EntryId), ("$provider", provider),
+                """, ("$mail", mailEntryId), ("$provider", provider),
                 ("$message", message.ProviderMessageKey), ("$key", attachment.ProviderAttachmentKey),
                 ("$part", attachment.PartId), ("$filename", attachment.Filename),
                 ("$mime", attachment.MimeType), ("$size", attachment.SizeBytes),

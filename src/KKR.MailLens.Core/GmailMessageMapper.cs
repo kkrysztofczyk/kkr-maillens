@@ -59,6 +59,8 @@ static partial class GmailMessageMapper
         return new HarvestedMail
         {
             EntryId = message.EntryId,
+            SourceIdentity = message.EntryId,
+            LegacyEntryId = message.EntryId,
             StoreId = $"gmail:{message.AccountId}",
             FolderPath = $"gmail://{message.AccountId}",
             FolderLeaf = "gmail",

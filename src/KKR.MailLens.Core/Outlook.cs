@@ -10,6 +10,7 @@ namespace KKR.MailLens;
 sealed class HarvestedMail
 {
     public string EntryId = "", StoreId = "", FolderPath = "", FolderLeaf = "", ConversationId = "";
+    public string SourceIdentity = "", LegacyEntryId = "";
     public string? Received, Sent;
     public string SenderName = "", SenderEmail = "", Subject = "", Body = "", Categories = "";
     public string ToRecips = "", CcRecips = "", AttachmentNames = "";
@@ -282,9 +283,13 @@ sealed class Outlook : IDisposable
     static HarvestedMail Read(dynamic mail, string path, string leaf, string sid)
     {
         string entryId = Str(() => (string)mail.EntryID);
+        string providerMessageKey = new OutlookMessageLocator(sid, entryId).Encode();
+        string sourceIdentity = MailSourceIdentity.Create("outlook", providerMessageKey);
         var m = new HarvestedMail
         {
-            EntryId = entryId,
+            EntryId = sourceIdentity,
+            SourceIdentity = sourceIdentity,
+            LegacyEntryId = entryId,
             StoreId = sid,
             FolderPath = path,
             FolderLeaf = leaf,
@@ -299,7 +304,7 @@ sealed class Outlook : IDisposable
             Unread = Bool(() => (bool)mail.UnRead),
             Size = Int(() => (int)mail.Size),
             AttachmentProvider = "outlook",
-            ProviderMessageKey = new OutlookMessageLocator(sid, entryId).Encode(),
+            ProviderMessageKey = providerMessageKey,
         };
         var to = new List<string>(); var cc = new List<string>();
         try
