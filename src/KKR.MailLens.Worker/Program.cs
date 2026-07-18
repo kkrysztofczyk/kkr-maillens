@@ -63,12 +63,21 @@ do
             default:
                 throw new NotSupportedException($"Nieobsługiwany typ zadania: {job.JobType}");
         }
-        ProcessingJobRepository.Complete(connection, job.Id);
+        if (!ProcessingJobRepository.Complete(connection, job.Id, workerId))
+        {
+            Console.Error.WriteLine($"lost lease job={job.Id} type={job.JobType}");
+            return 3;
+        }
         Console.WriteLine($"completed job={job.Id} type={job.JobType}");
     }
     catch (Exception ex)
     {
-        ProcessingJobRepository.Fail(connection, job.Id, ex.GetType().Name, ex.Message, TimeSpan.FromMinutes(1));
+        if (!ProcessingJobRepository.Fail(connection, job.Id, workerId, ex.GetType().Name,
+            ex.Message, TimeSpan.FromMinutes(1)))
+        {
+            Console.Error.WriteLine($"lost lease job={job.Id} type={job.JobType}");
+            return 3;
+        }
         if (job.DocumentId is not null && job.Attempts >= job.MaxAttempts)
             ContentDocumentRepository.MarkFailed(connection, job.DocumentId.Value, ex.GetType().Name, ex.Message);
         Console.Error.WriteLine($"failed job={job.Id}: {ex.GetType().Name}");

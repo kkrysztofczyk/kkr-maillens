@@ -8,7 +8,7 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - [Audyt architektury i bezpieczeństwa](ARCHITECTURE-SECURITY-AUDIT-2026-07-18.md) — migawka `7f50d23`.
 - [Code review pipeline załączników](ATTACHMENT-PIPELINE-CODE-REVIEW-2026-07-18.md) — zakres `f4f6b02..01351b8`.
 
-## Status na `d3391d9`
+## Status bieżący
 
 ### Zamknięte lub nieaktualne
 
@@ -21,12 +21,12 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Działa szyfrowany i deduplikowany blob store, ekstrakcja dokumentów, segmenty oraz `content_fts`.
 - Działa lokalny OCR obrazów i mieszanych PDF-ów strona po stronie.
 - Dokumentacja opisuje Gmail, Workera, kolejkę, ekstrakcję i OCR.
-- Zestaw testów wzrósł z historycznych 20/31 do 50 testów.
+- `Complete` i `Fail` stosują fencing po stanie `running` i identyfikatorze właściciela lease.
+- Zestaw testów wzrósł z historycznych 20/31 do 53 testów.
 
 ### Otwarte — priorytet
 
 - Powiązać ochronę tokenów Gmail i haseł IMAP z odblokowaną sesją; obecnie podstawową ochroną jest DPAPI `CurrentUser`.
-- Dodać fencing do `ProcessingJobRepository.Complete` i `Fail`: aktualizować wyłącznie zadanie `running` należące do danego workera.
 - Usunąć wyścig `File.Exists`/`File.Move` podczas równoległego zapisu identycznego blobu.
 - Uwierzytelniać w AAD również wersję formatu blobu, nie tylko magic header.
 - Rozważyć jedną transakcję dla zapisu wiadomości, korpusu, metadanych załączników i enqueue strony synchronizacji.

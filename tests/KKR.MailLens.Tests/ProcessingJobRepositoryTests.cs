@@ -75,6 +75,68 @@ public sealed class ProcessingJobRepositoryTests
             db.Connection, "worker-2", TimeSpan.FromMinutes(1), now.AddMinutes(2)));
     }
 
+    [TestMethod]
+    public void Complete_OnlyOwnerCanCompleteRunningJob()
+    {
+        using var db = new TestDatabase();
+        long attachmentId = AddAttachment(db);
+        DateTimeOffset now = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        ProcessingJobRepository.Enqueue(db.Connection, "extract", attachmentId, availableAt: now);
+        ProcessingJob job = ProcessingJobRepository.LeaseNext(
+            db.Connection, "worker-1", TimeSpan.FromMinutes(5), now)!;
+
+        Assert.IsFalse(ProcessingJobRepository.Complete(db.Connection, job.Id, "worker-2"));
+        Assert.AreEqual("running", db.ScalarText("SELECT status FROM processing_jobs WHERE id=" + job.Id + ";"));
+        Assert.IsTrue(ProcessingJobRepository.Complete(db.Connection, job.Id, "worker-1"));
+        Assert.AreEqual("completed", db.ScalarText("SELECT status FROM processing_jobs WHERE id=" + job.Id + ";"));
+        Assert.IsFalse(ProcessingJobRepository.Complete(db.Connection, job.Id, "worker-1"));
+    }
+
+    [TestMethod]
+    public void Fail_OnlyOwnerCanRetryAndFinishJob()
+    {
+        using var db = new TestDatabase();
+        long attachmentId = AddAttachment(db);
+        DateTimeOffset now = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        ProcessingJobRepository.Enqueue(db.Connection, "extract", attachmentId,
+            maxAttempts: 2, availableAt: now);
+        ProcessingJob first = ProcessingJobRepository.LeaseNext(
+            db.Connection, "worker-1", TimeSpan.FromMinutes(5), now)!;
+
+        Assert.IsFalse(ProcessingJobRepository.Fail(db.Connection, first.Id, "worker-2",
+            "test-error", "Neutralny błąd", TimeSpan.Zero, now));
+        Assert.IsTrue(ProcessingJobRepository.Fail(db.Connection, first.Id, "worker-1",
+            "test-error", "Neutralny błąd", TimeSpan.Zero, now));
+        Assert.AreEqual("pending", db.ScalarText("SELECT status FROM processing_jobs WHERE id=" + first.Id + ";"));
+
+        ProcessingJob second = ProcessingJobRepository.LeaseNext(
+            db.Connection, "worker-2", TimeSpan.FromMinutes(5), now)!;
+        Assert.IsTrue(ProcessingJobRepository.Fail(db.Connection, second.Id, "worker-2",
+            "test-error", "Neutralny błąd", TimeSpan.Zero, now));
+        Assert.AreEqual("failed", db.ScalarText("SELECT status FROM processing_jobs WHERE id=" + first.Id + ";"));
+    }
+
+    [TestMethod]
+    public void StaleWorkerCannotCompleteOrFailReLeasedJob()
+    {
+        using var db = new TestDatabase();
+        long attachmentId = AddAttachment(db);
+        DateTimeOffset now = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        ProcessingJobRepository.Enqueue(db.Connection, "extract", attachmentId,
+            maxAttempts: 3, availableAt: now);
+        ProcessingJob first = ProcessingJobRepository.LeaseNext(
+            db.Connection, "worker-1", TimeSpan.FromMinutes(1), now)!;
+        ProcessingJob second = ProcessingJobRepository.LeaseNext(
+            db.Connection, "worker-2", TimeSpan.FromMinutes(5), now.AddMinutes(2))!;
+
+        Assert.AreEqual(first.Id, second.Id);
+        Assert.IsFalse(ProcessingJobRepository.Complete(db.Connection, first.Id, "worker-1"));
+        Assert.IsFalse(ProcessingJobRepository.Fail(db.Connection, first.Id, "worker-1",
+            "stale", "Neutralny błąd", TimeSpan.Zero, now.AddMinutes(2)));
+        Assert.AreEqual("running", db.ScalarText("SELECT status FROM processing_jobs WHERE id=" + first.Id + ";"));
+        Assert.AreEqual("worker-2", db.ScalarText("SELECT locked_by FROM processing_jobs WHERE id=" + first.Id + ";"));
+    }
+
     static long AddAttachment(TestDatabase db)
     {
         GmailAccountRecord account = db.AddAccount();

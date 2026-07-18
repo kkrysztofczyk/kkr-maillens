@@ -82,19 +82,20 @@ static class ProcessingJobRepository
         return job;
     }
 
-    public static void Complete(SqliteConnection connection, long id)
+    public static bool Complete(SqliteConnection connection, long id, string workerId)
     {
-        Execute(connection, null, """
+        ValidateWorker(workerId);
+        return ExecuteCount(connection, null, """
             UPDATE processing_jobs SET status='completed',completed_at=$now,
-                locked_by=NULL,locked_at=NULL,lease_until=NULL WHERE id=$id;
-            """, ("$now", Stamp(DateTimeOffset.UtcNow)), ("$id", id));
+                locked_by=NULL,locked_at=NULL,lease_until=NULL
+            WHERE id=$id AND status='running' AND locked_by=$worker;
+            """, ("$now", Stamp(DateTimeOffset.UtcNow)), ("$worker", workerId), ("$id", id)) == 1;
     }
 
     public static bool RenewLease(SqliteConnection connection, long id, string workerId,
         TimeSpan leaseDuration, DateTimeOffset? clock = null)
     {
-        if (string.IsNullOrWhiteSpace(workerId))
-            throw new ArgumentException("Brak identyfikatora workera.", nameof(workerId));
+        ValidateWorker(workerId);
         if (leaseDuration <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(leaseDuration));
         DateTimeOffset now = clock ?? DateTimeOffset.UtcNow;
         using var command = connection.CreateCommand();
@@ -108,19 +109,20 @@ static class ProcessingJobRepository
         return command.ExecuteNonQuery() == 1;
     }
 
-    public static void Fail(SqliteConnection connection, long id, string code, string message,
-        TimeSpan retryDelay, DateTimeOffset? clock = null)
+    public static bool Fail(SqliteConnection connection, long id, string workerId, string code,
+        string message, TimeSpan retryDelay, DateTimeOffset? clock = null)
     {
+        ValidateWorker(workerId);
         DateTimeOffset now = clock ?? DateTimeOffset.UtcNow;
-        Execute(connection, null, """
+        return ExecuteCount(connection, null, """
             UPDATE processing_jobs SET
                 status=CASE WHEN attempts>=max_attempts THEN 'failed' ELSE 'pending' END,
                 available_at=$available,error_code=$code,error_message=$message,
                 locked_by=NULL,locked_at=NULL,lease_until=NULL,
                 completed_at=CASE WHEN attempts>=max_attempts THEN $now ELSE NULL END
-            WHERE id=$id;
+            WHERE id=$id AND status='running' AND locked_by=$worker;
             """, ("$available", Stamp(now.Add(retryDelay))), ("$code", code),
-            ("$message", message), ("$now", Stamp(now)), ("$id", id));
+            ("$message", message), ("$now", Stamp(now)), ("$worker", workerId), ("$id", id)) == 1;
     }
 
     static void RecoverExpired(SqliteConnection connection, SqliteTransaction transaction, DateTimeOffset now)
@@ -162,6 +164,10 @@ static class ProcessingJobRepository
         params (string Name, object? Value)[] parameters)
     { using var command = Command(connection, transaction, sql, parameters); command.ExecuteNonQuery(); }
 
+    static int ExecuteCount(SqliteConnection connection, SqliteTransaction? transaction, string sql,
+        params (string Name, object? Value)[] parameters)
+    { using var command = Command(connection, transaction, sql, parameters); return command.ExecuteNonQuery(); }
+
     static long? ScalarLong(SqliteConnection connection, SqliteTransaction transaction, string sql,
         params (string Name, object? Value)[] parameters)
     { using var command = Command(connection, transaction, sql, parameters); object? value = command.ExecuteScalar(); return value is null or DBNull ? null : Convert.ToInt64(value); }
@@ -172,4 +178,5 @@ static class ProcessingJobRepository
     static string Stamp(DateTimeOffset value) => value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
     static DateTimeOffset Parse(string value) => DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
     static void ValidateType(string type) { if (string.IsNullOrWhiteSpace(type)) throw new ArgumentException("Brak typu zadania.", nameof(type)); }
+    static void ValidateWorker(string workerId) { if (string.IsNullOrWhiteSpace(workerId)) throw new ArgumentException("Brak identyfikatora workera.", nameof(workerId)); }
 }
