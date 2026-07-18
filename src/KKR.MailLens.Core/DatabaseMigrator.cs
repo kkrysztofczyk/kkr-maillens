@@ -16,9 +16,10 @@ static class DatabaseMigrator
         new Migration007ContentDocuments(),
         new Migration008ContentSearch(),
         new Migration009SemanticSearch(),
+        new Migration010GmailSyncRetries(),
     ];
 
-    public const int LatestVersion = 9;
+    public const int LatestVersion = 10;
 
     public static void Migrate(SqliteConnection connection)
     {

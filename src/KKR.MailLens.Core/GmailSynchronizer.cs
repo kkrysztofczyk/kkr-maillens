@@ -94,7 +94,8 @@ sealed class GmailSynchronizer
         deleted += GmailRepository.PruneMissingMessages(_database, account.Id, account.SyncGeneration);
 
         string historyId = account.LastHistoryId ?? profile.HistoryId;
-        IncrementalResult catchUp = await IncrementalCore(account, historyId, labelNames, cancellationToken).ConfigureAwait(false);
+        IncrementalResult catchUp = await IncrementalCore(account, historyId, labelNames, cancellationToken,
+            retryPending: false).ConfigureAwait(false);
         processed += catchUp.Processed;
         inserted += catchUp.Inserted;
         updated += catchUp.Updated;
@@ -112,15 +113,29 @@ sealed class GmailSynchronizer
         IReadOnlyList<GmailApiLabel> labels = await _api.GetLabelsAsync(cancellationToken).ConfigureAwait(false);
         GmailRepository.UpsertLabels(_database, account.Id, labels);
         IReadOnlyDictionary<string, string> labelNames = GmailRepository.LabelNames(_database, account.Id);
-        IncrementalResult result = await IncrementalCore(account, account.LastHistoryId!, labelNames, cancellationToken).ConfigureAwait(false);
+        IncrementalResult result = await IncrementalCore(account, account.LastHistoryId!, labelNames, cancellationToken,
+            retryPending: true).ConfigureAwait(false);
         GmailRepository.UpdateHistory(_database, account.Id, result.HistoryId);
         return new GmailSyncResult(result.Processed, result.Inserted, result.Updated, result.Deleted, result.Errors, WasFullSync: false);
     }
 
     async Task<IncrementalResult> IncrementalCore(GmailAccountRecord account, string startHistoryId,
-        IReadOnlyDictionary<string, string> labelNames, CancellationToken cancellationToken)
+        IReadOnlyDictionary<string, string> labelNames, CancellationToken cancellationToken, bool retryPending)
     {
         long processed = 0, inserted = 0, updated = 0, deleted = 0, errors = 0;
+        IReadOnlyList<string> pendingRetries = retryPending
+            ? GmailRepository.RetryMessageIds(_database, account.Id) : [];
+        if (pendingRetries.Count > 0)
+        {
+            PageResult retried = await FetchAndSave(account, pendingRetries, labelNames, cancellationToken)
+                .ConfigureAwait(false);
+            processed += pendingRetries.Count;
+            inserted += retried.Inserted;
+            updated += retried.Updated;
+            deleted += retried.Deleted;
+            errors += retried.Errors;
+            _progress?.Report(new GmailSyncProgress("retry", processed, errors));
+        }
         string? pageToken = null;
         string latestHistoryId = startHistoryId;
         do
@@ -169,7 +184,10 @@ sealed class GmailSynchronizer
         }).ToArray();
         await Task.WhenAll(tasks).ConfigureAwait(false);
 
-        int deleted = GmailRepository.DeleteMessages(_database, account.Id, missing);
+        string[] missingIds = missing.ToArray();
+        int deleted = GmailRepository.DeleteMessages(_database, account.Id, missingIds);
+        var retryFailures = failures.Select(failure =>
+            (failure.MessageId, Stage: "download", failure.Code)).ToList();
         foreach (var failure in failures)
             GmailRepository.RecordError(_database, account.Id, failure.MessageId, "download", failure.Code);
 
@@ -186,6 +204,14 @@ sealed class GmailSynchronizer
             }
             transaction.Commit();
         }
+
+        retryFailures.AddRange(saved.FailedMessageIds.Select(messageId =>
+            (messageId, Stage: "database", Code: "SaveFailed")));
+        GmailRepository.QueueRetries(_database, account.Id, retryFailures);
+        GmailRepository.MarkMessagesSeen(_database, account.Id, account.SyncGeneration,
+            retryFailures.Select(failure => failure.MessageId));
+        GmailRepository.ResolveRetries(_database, account.Id,
+            saved.Saved.Select(message => message.GmailMessageId).Concat(missingIds));
 
         return new PageResult(saved.Inserted, saved.Updated, deleted, failures.Count + saved.FailedMessageIds.Count);
     }

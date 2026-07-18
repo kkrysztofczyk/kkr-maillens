@@ -480,6 +480,7 @@ static class Cli
             Console.WriteLine($"  ostatni sync     : {account.LastSyncAt ?? "(brak)"}");
             Console.WriteLine($"  pierwszy import  : {(account.InitialSyncCompleted ? "zakonczony" : "w toku / niewykonany")}");
             Console.WriteLine($"  bledy lacznie    : {GmailRepository.ErrorCount(c, account.Id)}");
+            Console.WriteLine($"  retry wiadomosci : {GmailRepository.RetryCount(c, account.Id)}");
             Console.WriteLine($"  ostatnie bledy   : {account.LastErrorCount}");
             Console.WriteLine($"  operacja         : {account.CurrentOperation ?? "bezczynna"}");
         }

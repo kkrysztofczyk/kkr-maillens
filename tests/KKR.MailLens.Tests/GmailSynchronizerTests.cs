@@ -136,6 +136,86 @@ public sealed class GmailSynchronizerTests
         Assert.AreEqual(1, result.Errors);
         Assert.AreEqual(1, GmailRepository.MessageCount(db.Connection, account.Id));
         Assert.AreEqual(1, GmailRepository.ErrorCount(db.Connection, account.Id));
+        Assert.AreEqual(1, GmailRepository.RetryCount(db.Connection, account.Id));
+
+        GmailAccountRecord checkpoint = GmailRepository.FindAccount(db.Connection, account.Id)!;
+        using var retryApi = new FakeGmailApiClient();
+        retryApi.Messages["broken"] = GmailTestMessage.Create("broken");
+        retryApi.HistoryPages.Enqueue(() => new GmailHistoryPage([], [], "102", null));
+        GmailSyncResult retried = await new GmailSynchronizer(db.Connection, retryApi)
+            .SyncAsync(checkpoint, false, CancellationToken.None);
+
+        Assert.AreEqual(1, retried.Inserted);
+        Assert.AreEqual(2, GmailRepository.MessageCount(db.Connection, account.Id));
+        Assert.AreEqual(0, GmailRepository.RetryCount(db.Connection, account.Id));
+        Assert.AreEqual("102", GmailRepository.FindAccount(db.Connection, account.Id)!.LastHistoryId);
+    }
+
+    [TestMethod]
+    public async Task IncrementalFailure_IsRetriedAfterHistoryCheckpointAdvances()
+    {
+        using var db = new TestDatabase();
+        GmailAccountRecord account = db.AddAccount();
+        using (var initial = new FakeGmailApiClient())
+        {
+            initial.Messages["m1"] = GmailTestMessage.Create("m1");
+            initial.MessagePages[""] = () => new GmailMessagePage(["m1"], null);
+            initial.HistoryPages.Enqueue(() => new GmailHistoryPage([], [], "101", null));
+            await new GmailSynchronizer(db.Connection, initial).SyncAsync(account, false, CancellationToken.None);
+        }
+
+        GmailAccountRecord current = GmailRepository.FindAccount(db.Connection, account.Id)!;
+        using (var failed = new FakeGmailApiClient())
+        {
+            failed.MessageErrors["m1"] = new IOException("neutral transient failure");
+            failed.HistoryPages.Enqueue(() => new GmailHistoryPage(["m1"], [], "102", null));
+            GmailSyncResult result = await new GmailSynchronizer(db.Connection, failed)
+                .SyncAsync(current, false, CancellationToken.None);
+            Assert.AreEqual(1, result.Errors);
+        }
+
+        Assert.AreEqual("102", GmailRepository.FindAccount(db.Connection, account.Id)!.LastHistoryId);
+        Assert.AreEqual(1, GmailRepository.RetryCount(db.Connection, account.Id));
+
+        current = GmailRepository.FindAccount(db.Connection, account.Id)!;
+        using var recovered = new FakeGmailApiClient();
+        recovered.Messages["m1"] = GmailTestMessage.Create("m1", subject: "Recovered Record");
+        recovered.HistoryPages.Enqueue(() => new GmailHistoryPage([], [], "103", null));
+        await new GmailSynchronizer(db.Connection, recovered).SyncAsync(current, false, CancellationToken.None);
+
+        Assert.AreEqual("Recovered Record", db.ScalarText("SELECT subject FROM messages;"));
+        Assert.AreEqual(0, GmailRepository.RetryCount(db.Connection, account.Id));
+        Assert.AreEqual("103", GmailRepository.FindAccount(db.Connection, account.Id)!.LastHistoryId);
+    }
+
+    [TestMethod]
+    public async Task FullSyncFailure_DoesNotPruneExistingMessage()
+    {
+        using var db = new TestDatabase();
+        GmailAccountRecord account = db.AddAccount();
+        using (var initial = new FakeGmailApiClient())
+        {
+            initial.Messages["m1"] = GmailTestMessage.Create("m1");
+            initial.Messages["m2"] = GmailTestMessage.Create("m2");
+            initial.MessagePages[""] = () => new GmailMessagePage(["m1", "m2"], null);
+            initial.HistoryPages.Enqueue(() => new GmailHistoryPage([], [], "101", null));
+            await new GmailSynchronizer(db.Connection, initial).SyncAsync(account, false, CancellationToken.None);
+        }
+
+        GmailAccountRecord current = GmailRepository.FindAccount(db.Connection, account.Id)!;
+        using var failed = new FakeGmailApiClient { Profile = new GmailProfile("sender@example.invalid", "200") };
+        failed.Messages["m2"] = GmailTestMessage.Create("m2", subject: "Still Present");
+        failed.MessageErrors["m1"] = new IOException("neutral transient failure");
+        failed.MessagePages[""] = () => new GmailMessagePage(["m1", "m2"], null);
+        failed.HistoryPages.Enqueue(() => new GmailHistoryPage([], [], "201", null));
+
+        GmailSyncResult result = await new GmailSynchronizer(db.Connection, failed)
+            .SyncAsync(current, true, CancellationToken.None);
+
+        Assert.IsTrue(result.Errors >= 1);
+        Assert.AreEqual(2, GmailRepository.MessageCount(db.Connection, account.Id));
+        Assert.AreEqual(1, GmailRepository.RetryCount(db.Connection, account.Id));
+        Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM messages WHERE gmail_message_id='m1';"));
     }
 
     [TestMethod]

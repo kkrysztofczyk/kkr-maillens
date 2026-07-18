@@ -78,7 +78,7 @@ run\KKR.MailLens.exe query-content "neutralny tekst"
 
 Pełną kontrolowaną synchronizację wymusza `gmail sync --full`. Działającą synchronizację można zatrzymać z drugiego terminala poleceniem `gmail cancel`. Przy wielu kontach służy parametr `--account <id|adres>`.
 
-Pierwszy import jest stronicowany i zapamiętuje checkpoint. Kolejne uruchomienia korzystają z historii zmian Gmaila; po wygaśnięciu `historyId` aplikacja automatycznie wykonuje kontrolowany full sync bez duplikowania danych. Importowane są także wiadomości zarchiwizowane, etykiety, flagi unread/spam/trash oraz metadane załączników.
+Pierwszy import jest stronicowany i zapamiętuje checkpoint. Kolejne uruchomienia korzystają z historii zmian Gmaila; po wygaśnięciu `historyId` aplikacja automatycznie wykonuje kontrolowany full sync bez duplikowania danych. Wiadomości, których chwilowo nie udało się pobrać lub zapisać, trafiają do trwałej kolejki retry i są ponawiane przed kolejną porcją historii; pełna synchronizacja nie usuwa ich istniejących kopii z lokalnego korpusu. Importowane są także wiadomości zarchiwizowane, etykiety, flagi unread/spam/trash oraz metadane załączników.
 
 ## Załączniki, ekstrakcja i OCR
 

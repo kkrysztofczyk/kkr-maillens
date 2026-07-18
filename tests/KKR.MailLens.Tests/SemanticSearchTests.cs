@@ -78,7 +78,8 @@ public sealed class SemanticSearchTests
         using var provider = new FakeEmbeddingProvider();
         await SemanticIndex.IndexAsync(db.Connection, provider);
         Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM content_embeddings;"));
-        Assert.AreEqual(9, db.ScalarLong("SELECT CAST(v AS INTEGER) FROM meta WHERE k='schema_version';"));
+        Assert.AreEqual(Db.SchemaVersion,
+            db.ScalarLong("SELECT CAST(v AS INTEGER) FROM meta WHERE k='schema_version';"));
 
         using var command = db.Connection.CreateCommand();
         command.CommandText = "DELETE FROM content_segments;";

@@ -224,6 +224,82 @@ static class GmailRepository
         return DeleteMessages(c, accountId, ids);
     }
 
+    public static IReadOnlyList<string> RetryMessageIds(SqliteConnection c, long accountId, int limit = 1000)
+    {
+        using var cmd = Command(c, null, """
+            SELECT gmail_message_id FROM gmail_sync_retries
+            WHERE account_id=$account ORDER BY last_failed_at,gmail_message_id LIMIT $limit;
+            """, ("$account", accountId), ("$limit", Math.Clamp(limit, 1, 10_000)));
+        var result = new List<string>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read()) result.Add(reader.GetString(0));
+        return result;
+    }
+
+    public static long RetryCount(SqliteConnection c, long accountId) =>
+        ScalarLong(c, null, "SELECT count(*) FROM gmail_sync_retries WHERE account_id=$account;",
+            ("$account", accountId)) ?? 0;
+
+    public static void QueueRetries(SqliteConnection c, long accountId,
+        IEnumerable<(string MessageId, string Stage, string Code)> failures)
+    {
+        var rows = failures.Where(failure => !string.IsNullOrWhiteSpace(failure.MessageId))
+            .GroupBy(failure => failure.MessageId, StringComparer.Ordinal)
+            .Select(group => group.Last())
+            .ToArray();
+        if (rows.Length == 0) return;
+        string now = Now();
+        using var transaction = c.BeginTransaction();
+        foreach (var failure in rows)
+        {
+            using var command = Command(c, transaction, """
+                INSERT INTO gmail_sync_retries(account_id,gmail_message_id,failure_stage,error_code,
+                    attempts,first_failed_at,last_failed_at)
+                VALUES($account,$message,$stage,$code,1,$now,$now)
+                ON CONFLICT(account_id,gmail_message_id) DO UPDATE SET
+                    failure_stage=excluded.failure_stage,error_code=excluded.error_code,
+                    attempts=gmail_sync_retries.attempts+1,last_failed_at=excluded.last_failed_at;
+                """, ("$account", accountId), ("$message", failure.MessageId),
+                ("$stage", failure.Stage), ("$code", failure.Code), ("$now", now));
+            command.ExecuteNonQuery();
+        }
+        transaction.Commit();
+    }
+
+    public static void ResolveRetries(SqliteConnection c, long accountId, IEnumerable<string> messageIds)
+    {
+        string[] ids = messageIds.Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal).ToArray();
+        if (ids.Length == 0) return;
+        using var transaction = c.BeginTransaction();
+        foreach (string id in ids)
+        {
+            using var command = Command(c, transaction,
+                "DELETE FROM gmail_sync_retries WHERE account_id=$account AND gmail_message_id=$message;",
+                ("$account", accountId), ("$message", id));
+            command.ExecuteNonQuery();
+        }
+        transaction.Commit();
+    }
+
+    public static void MarkMessagesSeen(SqliteConnection c, long accountId, long generation,
+        IEnumerable<string> messageIds)
+    {
+        string[] ids = messageIds.Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal).ToArray();
+        if (ids.Length == 0) return;
+        using var transaction = c.BeginTransaction();
+        foreach (string id in ids)
+        {
+            using var command = Command(c, transaction, """
+                UPDATE messages SET last_seen_generation=$generation
+                WHERE account_id=$account AND gmail_message_id=$message;
+                """, ("$generation", generation), ("$account", accountId), ("$message", id));
+            command.ExecuteNonQuery();
+        }
+        transaction.Commit();
+    }
+
     public static void BeginFullSync(SqliteConnection c, long accountId, string historyId, bool reset)
     {
         string sql = reset
