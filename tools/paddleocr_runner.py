@@ -6,6 +6,7 @@ import argparse
 import contextlib
 import io
 import json
+import os
 import sys
 
 
@@ -18,6 +19,21 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+@contextlib.contextmanager
+def redirect_native_stdout_to_stderr():
+    """Keep native Paddle/oneDNN writes away from the JSON stdout protocol."""
+    sys.stdout.flush()
+    saved_stdout = os.dup(sys.stdout.fileno())
+    try:
+        os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+        yield
+    finally:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os.dup2(saved_stdout, sys.stdout.fileno())
+        os.close(saved_stdout)
+
+
 def main() -> int:
     args = parse_args()
     image_bytes = sys.stdin.buffer.read()
@@ -26,7 +42,7 @@ def main() -> int:
 
     # Biblioteki mogą wypisywać komunikaty inicjalizacji. Protokół stdout musi
     # pozostać pojedynczym obiektem JSON, więc diagnostyka trafia na stderr.
-    with contextlib.redirect_stdout(sys.stderr):
+    with redirect_native_stdout_to_stderr(), contextlib.redirect_stdout(sys.stderr):
         import numpy as np
         from PIL import Image
         from paddleocr import PaddleOCR
