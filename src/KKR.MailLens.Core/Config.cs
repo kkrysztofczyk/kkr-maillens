@@ -20,6 +20,14 @@ sealed class AppConfig
     public int OcrMaxPdfPages { get; set; } = 100;
     public int OcrPdfRenderTimeoutSeconds { get; set; } = 120;
     public int OcrPdfBatchSize { get; set; } = 4;
+    public bool PaddleOcrEnabled { get; set; }
+    public string PaddleOcrPythonPath { get; set; } = "python.exe";
+    public string PaddleOcrRunnerPath { get; set; } = "tools\\paddleocr_runner.py";
+    public string PaddleOcrLanguage { get; set; } = "pl";
+    public string PaddleOcrModelVersion { get; set; } = "PP-OCRv6";
+    public string PaddleOcrDevice { get; set; } = "cpu";
+    public double PaddleOcrMinimumConfidence { get; set; } = 0.50;
+    public int PaddleOcrTimeoutSeconds { get; set; } = 300;
     public int WorkerMemoryLimitMb { get; set; } = 1536;
     public string FfmpegPath { get; set; } = "ffmpeg.exe";
     public string WhisperPath { get; set; } = "whisper-cli.exe";

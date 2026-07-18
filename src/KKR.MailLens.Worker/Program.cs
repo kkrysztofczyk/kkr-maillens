@@ -67,8 +67,16 @@ try
                     AppConfig config = AppConfig.Load();
                     int ocrTimeoutSeconds = Math.Clamp(config.OcrTimeoutSeconds, 10, 3600);
                     int renderTimeoutSeconds = Math.Clamp(config.OcrPdfRenderTimeoutSeconds, 10, 3600);
+                    int paddleTimeoutSeconds = Math.Clamp(config.PaddleOcrTimeoutSeconds, 10, 3600);
                     TimeSpan ocrLeaseDuration = TimeSpan.FromSeconds(
-                        Math.Max(ocrTimeoutSeconds, renderTimeoutSeconds) + 60);
+                        Math.Max(Math.Max(ocrTimeoutSeconds, renderTimeoutSeconds),
+                            config.PaddleOcrEnabled ? paddleTimeoutSeconds : 0) + 60);
+                    PaddleOcrOptions? paddleOptions = config.PaddleOcrEnabled
+                        ? new PaddleOcrOptions(config.PaddleOcrPythonPath, config.PaddleOcrRunnerPath,
+                            config.PaddleOcrLanguage, config.PaddleOcrModelVersion, config.PaddleOcrDevice,
+                            Math.Clamp(config.PaddleOcrMinimumConfidence, 0, 1),
+                            TimeSpan.FromSeconds(paddleTimeoutSeconds))
+                        : null;
                     if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, ocrLeaseDuration))
                         throw new InvalidOperationException("Worker utracił lease zadania OCR.");
                     await OcrAttachmentProcessor.ProcessAsync(connection, store, job.AttachmentId.Value,
@@ -84,7 +92,8 @@ try
                             shutdown.Token.ThrowIfCancellationRequested();
                             if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, ocrLeaseDuration))
                                 throw new InvalidOperationException("Worker utracił lease zadania OCR.");
-                    });
+                        },
+                        fallbackOptions: paddleOptions);
                     EnqueueSemanticIfEnabled(connection, job.AttachmentId.Value, job.DocumentId.Value);
                     break;
                 case "transcribe":

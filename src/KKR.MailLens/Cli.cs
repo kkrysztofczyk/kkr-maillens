@@ -62,6 +62,26 @@ static class Cli
         if (GetStr(args, "--ocr-pdf-batch-size") is { } batchSize
             && int.TryParse(batchSize, out int batchPages))
         { cfg.OcrPdfBatchSize = Math.Clamp(batchPages, 1, 16); changed = true; }
+        if (GetStr(args, "--paddleocr-enabled") is { } paddleEnabled
+            && bool.TryParse(paddleEnabled, out bool usePaddle))
+        { cfg.PaddleOcrEnabled = usePaddle; changed = true; }
+        if (GetStr(args, "--paddleocr-python") is { } paddlePython)
+        { cfg.PaddleOcrPythonPath = paddlePython.Trim(); changed = true; }
+        if (GetStr(args, "--paddleocr-runner") is { } paddleRunner)
+        { cfg.PaddleOcrRunnerPath = paddleRunner.Trim(); changed = true; }
+        if (GetStr(args, "--paddleocr-language") is { } paddleLanguage)
+        { cfg.PaddleOcrLanguage = paddleLanguage.Trim(); changed = true; }
+        if (GetStr(args, "--paddleocr-version") is { } paddleVersion)
+        { cfg.PaddleOcrModelVersion = paddleVersion.Trim(); changed = true; }
+        if (GetStr(args, "--paddleocr-device") is { } paddleDevice)
+        { cfg.PaddleOcrDevice = paddleDevice.Trim(); changed = true; }
+        if (GetStr(args, "--paddleocr-min-confidence") is { } paddleConfidence
+            && double.TryParse(paddleConfidence, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out double minimumConfidence))
+        { cfg.PaddleOcrMinimumConfidence = Math.Clamp(minimumConfidence, 0, 1); changed = true; }
+        if (GetStr(args, "--paddleocr-timeout") is { } paddleTimeout
+            && int.TryParse(paddleTimeout, out int paddleSeconds))
+        { cfg.PaddleOcrTimeoutSeconds = Math.Clamp(paddleSeconds, 10, 3600); changed = true; }
         if (GetStr(args, "--worker-memory-mb") is { } workerMemory
             && int.TryParse(workerMemory, out int memoryMb))
         { cfg.WorkerMemoryLimitMb = Math.Clamp(memoryMb, 256, 16_384); changed = true; }
@@ -111,12 +131,13 @@ static class Cli
         Console.WriteLine($"Tesseract    : {cfg.TesseractPath}");
         Console.WriteLine($"OCR          : {cfg.OcrLanguages}, timeout {cfg.OcrTimeoutSeconds} s");
         Console.WriteLine($"OCR PDF      : {cfg.OcrPdfDpi} DPI, max {cfg.OcrMaxPdfPages} stron, batch {cfg.OcrPdfBatchSize}, render timeout {cfg.OcrPdfRenderTimeoutSeconds} s/batch");
+        Console.WriteLine($"PaddleOCR    : {(cfg.PaddleOcrEnabled ? "włączony fallback" : "wyłączony")}, {cfg.PaddleOcrModelVersion}/{cfg.PaddleOcrLanguage}, {cfg.PaddleOcrDevice}, próg {cfg.PaddleOcrMinimumConfidence:0.00}, timeout {cfg.PaddleOcrTimeoutSeconds} s");
         Console.WriteLine($"Worker       : limit pamięci {cfg.WorkerMemoryLimitMb} MiB");
         Console.WriteLine($"FFmpeg       : {cfg.FfmpegPath}, timeout {cfg.FfmpegTimeoutSeconds} s");
         Console.WriteLine($"whisper.cpp  : {cfg.WhisperPath}, model '{cfg.WhisperModelPath}', język {cfg.WhisperLanguage}, timeout {cfg.WhisperTimeoutSeconds} s");
         Console.WriteLine($"Transkrypcja : max {cfg.TranscriptionMaxMinutes} min");
         Console.WriteLine($"Semantyczne  : {(cfg.SemanticEnabled ? "włączone" : "wyłączone")}, model {cfg.EmbeddingModel}, endpoint {cfg.EmbeddingEndpoint}, batch {cfg.EmbeddingBatchSize}, kandydaci {cfg.SemanticMaxCandidates}");
-        if (!changed) Console.WriteLine("Zmiana: config [--store <fragment>] [--max N] [--tesseract <sciezka>] [--ocr-languages pol+eng] [--ocr-timeout N] [--ocr-pdf-dpi N] [--ocr-max-pdf-pages N] [--ocr-pdf-render-timeout N] [--ocr-pdf-batch-size N] [--worker-memory-mb N] [--ffmpeg <sciezka>] [--whisper <sciezka>] [--whisper-model <plik>] [--whisper-language auto] [--ffmpeg-timeout N] [--whisper-timeout N] [--transcription-max-minutes N] [--semantic-enabled true|false] [--embedding-endpoint URL] [--embedding-model NAME] [--embedding-batch-size N] [--embedding-timeout N] [--semantic-max-candidates N]");
+        if (!changed) Console.WriteLine("Zmiana: config [--store <fragment>] [--max N] [--tesseract <sciezka>] [--ocr-languages pol+eng] [--ocr-timeout N] [--ocr-pdf-dpi N] [--ocr-max-pdf-pages N] [--ocr-pdf-render-timeout N] [--ocr-pdf-batch-size N] [--paddleocr-enabled true|false] [--paddleocr-python <sciezka>] [--paddleocr-runner <plik>] [--paddleocr-language pl] [--paddleocr-version PP-OCRv6] [--paddleocr-device cpu] [--paddleocr-min-confidence 0.5] [--paddleocr-timeout N] [--worker-memory-mb N] [--ffmpeg <sciezka>] [--whisper <sciezka>] [--whisper-model <plik>] [--whisper-language auto] [--ffmpeg-timeout N] [--whisper-timeout N] [--transcription-max-minutes N] [--semantic-enabled true|false] [--embedding-endpoint URL] [--embedding-model NAME] [--embedding-batch-size N] [--embedding-timeout N] [--semantic-max-candidates N]");
         return 0;
     }
 
@@ -657,6 +678,9 @@ static class Cli
               config [--store <fragm>] [--max <N>] [--tesseract <sciezka>] [--ocr-languages pol+eng]
                      [--ocr-timeout N] [--ocr-pdf-dpi N] [--ocr-max-pdf-pages N]
                      [--ocr-pdf-render-timeout N] [--ocr-pdf-batch-size N] [--worker-memory-mb N]
+                     [--paddleocr-enabled true|false] [--paddleocr-python <sciezka>]
+                     [--paddleocr-runner <plik>] [--paddleocr-language pl] [--paddleocr-version PP-OCRv6]
+                     [--paddleocr-device cpu] [--paddleocr-min-confidence 0.5] [--paddleocr-timeout N]
                      [--ffmpeg <sciezka>] [--whisper <sciezka>] [--whisper-model <plik>]
                      [--whisper-language auto] [--ffmpeg-timeout N] [--whisper-timeout N]
                      [--transcription-max-minutes N]

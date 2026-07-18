@@ -32,6 +32,7 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Zadanie `download` powstaje wyłącznie dla załącznika w stanie `metadata-only`; ponowny upsert nie przetwarza gotowej treści.
 - Walidacja rozmiaru Gmail nadal egzekwuje twardy limit pobrania, ale toleruje niewielką różnicę metadanych i odrzuca dopiero istotny rozjazd.
 - Puste wyniki OCR strony lub obrazu kończą dokument poprawnie, zachowując pozostałe segmenty zamiast oznaczać całość jako `failed`.
+- Opcjonalny lokalny fallback PaddleOCR działa tylko po pustym wyniku Tesseracta, używa ograniczonego protokołu `stdin`/JSON `stdout`, zapisuje pochodzenie wyniku i nie nadpisuje rozpoznanego tekstu pierwszego silnika.
 - Strony PDF wymagające OCR są renderowane w konfigurowalnych batchach; kolejność jest walidowana, heartbeat działa po każdej stronie, a wszystkie bufory PNG są zerowane także przy błędzie.
 - OpenXML ma limity liczby wpisów, rozmiaru po rozwinięciu i współczynnika kompresji oraz odrzuca niebezpieczne ścieżki archiwum.
 - Nieobsługiwane typy kończą się statusem `skipped`, bez trzech bezcelowych prób i szumu w `failed`.
@@ -55,4 +56,4 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Endpoint embeddingów jest ograniczony do loopback i nie używa systemowego proxy; tekst OCR i transkrypcji nie jest modyfikowany przez model.
 - Powtarzanie metadanych wiadomości przy segmentach FTS5 pozostaje świadomym kompromisem bieżącego schematu; daje prosty, odtwarzalny ranking kosztem większego indeksu.
 - Polityka uwierzytelnienia pozostaje jawna: niepusty PIN jest dozwolony dla zgodności, a dokumentacja zaleca długą frazę lub `PIN + YubiKey`; gest dotyku zależy od konfiguracji slotu urządzenia.
-- Zestaw testów wzrósł z historycznych 20/31 do 94 testów.
+- Zestaw testów wzrósł z historycznych 20/31 do 97 testów.

@@ -11,5 +11,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\KKR.MailLens.Core\KKR.MailLens.Core.csproj" />
+    <None Include="..\..\tools\paddleocr_runner.py" Link="tools\paddleocr_runner.py"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

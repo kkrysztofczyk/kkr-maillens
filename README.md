@@ -15,6 +15,7 @@ Dostępne jest opcjonalne wyszukiwanie semantyczne i hybrydowe przez lokalny end
 - źródło desktopowe obsługiwane przez integrację COM, konto IMAP albo konto Gmail połączone przez OAuth 2.0
 - opcjonalny sprzętowy drugi składnik uwierzytelnienia
 - opcjonalnie Tesseract 5 z danymi językowymi `pol` i `eng` do lokalnego OCR obrazów i skanowanych PDF-ów
+- opcjonalnie Python, PaddlePaddle i PaddleOCR 3 do drugiej, całkowicie lokalnej próby OCR, gdy Tesseract nie zwróci tekstu
 - opcjonalnie FFmpeg, `whisper-cli` z projektu whisper.cpp i lokalny model `ggml-small.bin` do transkrypcji audio/wideo
 - opcjonalnie lokalny Ollama i model embeddingów do wyszukiwania semantycznego; aplikacja akceptuje wyłącznie endpoint loopback
 
@@ -87,6 +88,19 @@ Obsługiwane ekstraktory deterministyczne obejmują TXT/CSV/XML/JSON, HTML, PDF 
 
 OCR obrazów PNG/JPEG/TIFF/BMP oraz skanowanych stron PDF korzysta z lokalnego Tesseracta przez `stdin`/`stdout`, bez tworzenia jawnego pliku tymczasowego. PDF jest analizowany strona po stronie: zachowywany jest poprawny tekst istniejący, a przez PDFium renderowane są wyłącznie strony puste lub zawierające zbyt mało użytecznego tekstu. Obrazy PNG stron pozostają tylko w pamięci i są zerowane po OCR.
 
+Opcjonalny fallback PaddleOCR jest domyślnie wyłączony. Worker uruchamia go tylko dla obrazu albo strony, dla której Tesseract zwrócił pusty wynik. Istniejący tekst Tesseracta nie jest porównywany, nadpisywany ani automatycznie „poprawiany”, dlatego drugi silnik nie może po cichu zmienić rozpoznanego numeru lub identyfikatora. Użycie fallbacku jest jawnie zapisane w `extractor_name` i `model_name`. Adapter `tools\paddleocr_runner.py` przekazuje obraz przez `stdin`, zwraca ograniczony JSON przez `stdout` i nie korzysta z usługi chmurowej.
+
+Najprostsza instalacja wariantu CPU w osobnym, ignorowanym przez Git środowisku wygląda tak (zgodnie z [instrukcją PaddlePaddle](https://www.paddleocr.ai/main/en/version3.x/paddlepaddle_installation.html) i [instrukcją PaddleOCR](https://www.paddleocr.ai/main/en/version3.x/installation.html)):
+
+```powershell
+py -3.12 -m venv .tools\paddleocr
+.tools\paddleocr\Scripts\python.exe -m pip install paddlepaddle==3.2.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+.tools\paddleocr\Scripts\python.exe -m pip install paddleocr
+run\KKR.MailLens.exe config --paddleocr-enabled true --paddleocr-python "$PWD\.tools\paddleocr\Scripts\python.exe" --paddleocr-language pl --paddleocr-version PP-OCRv6 --paddleocr-device cpu --paddleocr-min-confidence 0.5 --paddleocr-timeout 300
+```
+
+Pierwsza inferencja może pobrać oficjalny model do lokalnego cache PaddleOCR; późniejsze rozpoznawanie odbywa się lokalnie. Ustawienie `--paddleocr-enabled false` wyłącza fallback bez wpływu na Tesseract, import, szyfrowanie, SQLite ani FTS5.
+
 Domyślne języki to `pol+eng`, rozdzielczość PDF to 300 DPI, a limit jednego dokumentu wynosi 100 stron wymagających OCR. Ścieżkę, języki, timeouty i limity można ustawić poleceniem:
 
 ```powershell
@@ -98,7 +112,7 @@ run\KKR.MailLens.exe rebuild-content-index
 
 PDF bez użytecznej warstwy tekstowej na co najmniej jednej stronie otrzymuje status `needs-ocr`, po czym Worker automatycznie zleca OCR tych stron. PDF jest otwierany raz na mały, konfigurowalny batch stron (domyślnie 4), a każdy bufor PNG jest zerowany natychmiast po OCR. Segmenty tekstowe i OCR są scalane według numeru strony i indeksowane w FTS5. Podczas długiego OCR Worker odnawia dzierżawę zadania po każdej stronie.
 
-`processing-run` uruchamia Workera z ograniczonym tokenem Windows, na nieinteraktywnym pulpicie i w Job Object z blokadą dostępu do schowka, ustawień interfejsu oraz globalnych uchwytów. Konfigurowalny łączny limit pamięci obejmuje także procesy potomne. Proces jest tworzony jako wstrzymany, ograniczenia są nakładane przed wykonaniem pierwszej instrukcji, a bezpośrednio uruchomiony `KKR.MailLens.Worker.exe` odmawia pracy. Ctrl+C i zablokowanie sesji anulują aktywne operacje Gmail/Tesseract/PDF; zadanie wraca do kolejki bez zużycia próby.
+`processing-run` uruchamia Workera z ograniczonym tokenem Windows, na nieinteraktywnym pulpicie i w Job Object z blokadą dostępu do schowka, ustawień interfejsu oraz globalnych uchwytów. Konfigurowalny łączny limit pamięci obejmuje także procesy potomne, w tym Tesseract i Python/PaddleOCR. Proces jest tworzony jako wstrzymany, ograniczenia są nakładane przed wykonaniem pierwszej instrukcji, a bezpośrednio uruchomiony `KKR.MailLens.Worker.exe` odmawia pracy. Ctrl+C i zablokowanie sesji anulują aktywne operacje Gmail/OCR/PDF; zadanie wraca do kolejki bez zużycia próby.
 
 ## Transkrypcja audio i wideo
 

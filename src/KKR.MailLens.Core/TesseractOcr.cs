@@ -130,7 +130,7 @@ static class OcrAttachmentProcessor
     public static async Task ProcessAsync(SqliteConnection connection, EncryptedBlobStore store,
         long attachmentId, long documentId, TesseractOptions options, CancellationToken cancellationToken,
         IPdfPageRenderer? pdfRenderer = null, PdfRenderOptions? pdfOptions = null,
-        Action? heartbeat = null)
+        Action? heartbeat = null, PaddleOcrOptions? fallbackOptions = null)
     {
         MailAttachmentRepository.Item item = MailAttachmentRepository.Get(connection, attachmentId);
         StoredBlob blob = EncryptedBlobStore.Get(connection,
@@ -140,21 +140,27 @@ static class OcrAttachmentProcessor
         {
             DetectedFile detected = FileTypeDetector.Detect(item.Filename, item.MimeType, plaintext);
             var engine = new TesseractOcrEngine(options);
+            PaddleOcrEngine? fallback = fallbackOptions is null ? null : new PaddleOcrEngine(fallbackOptions);
             if (detected.MimeType == "application/pdf")
             {
-                ExtractionResult result = await ExtractPdfAsync(detected, engine,
+                OcrRun result = await ExtractPdfAsync(detected, engine, fallback,
                     pdfRenderer ?? new PdfiumPageRenderer(), pdfOptions ?? new PdfRenderOptions(),
                     cancellationToken, heartbeat).ConfigureAwait(false);
-                ContentDocumentRepository.SaveExtraction(connection, documentId, result,
-                    "pdfpig+tesseract", "1", modelName: options.Languages, ocrCompleted: true);
+                ContentDocumentRepository.SaveExtraction(connection, documentId, result.Result,
+                    result.UsedFallback ? "pdfpig+tesseract+paddleocr-fallback" : "pdfpig+tesseract", "1",
+                    modelName: result.UsedFallback ? $"{options.Languages};{fallback!.ModelName}" : options.Languages,
+                    ocrCompleted: true);
             }
             else
             {
-                ExtractionResult result = await engine.ExtractAsync(plaintext, detected.MimeType, cancellationToken)
-                    .ConfigureAwait(false);
+                OcrRun result = await ExtractWithFallbackAsync(engine, fallback, plaintext,
+                    detected.MimeType, cancellationToken).ConfigureAwait(false);
                 heartbeat?.Invoke();
-                ContentDocumentRepository.SaveExtraction(connection, documentId, result, "tesseract", "cli-v1",
-                    documentKind: "ocr", modelName: options.Languages, ocrCompleted: true);
+                ContentDocumentRepository.SaveExtraction(connection, documentId, result.Result,
+                    result.UsedFallback ? "paddleocr-fallback" : "tesseract", "cli-v1",
+                    documentKind: "ocr",
+                    modelName: result.UsedFallback ? fallback!.ModelName : options.Languages,
+                    ocrCompleted: true);
             }
         }
         finally
@@ -163,19 +169,20 @@ static class OcrAttachmentProcessor
         }
     }
 
-    static async Task<ExtractionResult> ExtractPdfAsync(DetectedFile detected, TesseractOcrEngine engine,
-        IPdfPageRenderer renderer, PdfRenderOptions renderOptions, CancellationToken cancellationToken,
-        Action? heartbeat)
+    static async Task<OcrRun> ExtractPdfAsync(DetectedFile detected, TesseractOcrEngine engine,
+        PaddleOcrEngine? fallback, IPdfPageRenderer renderer, PdfRenderOptions renderOptions,
+        CancellationToken cancellationToken, Action? heartbeat)
     {
         renderOptions.Validate();
         ExtractionResult textResult = new PdfTextExtractor().Extract(detected, new TextExtractionOptions());
         int[] pagesToOcr = textResult.OcrPageNumbers.Distinct().Order().ToArray();
-        if (pagesToOcr.Length == 0) return textResult;
+        if (pagesToOcr.Length == 0) return new OcrRun(textResult, false);
         if (pagesToOcr.Length > renderOptions.MaxPages)
             throw new InvalidDataException(
                 $"Dokument wymaga OCR dla {pagesToOcr.Length} stron; limit wynosi {renderOptions.MaxPages}.");
 
         var ocrSegments = new List<SegmentDraft>(pagesToOcr.Length);
+        bool usedFallback = false;
         foreach (int[] batch in pagesToOcr.Chunk(renderOptions.BatchSize))
         {
             heartbeat?.Invoke();
@@ -193,10 +200,11 @@ static class OcrAttachmentProcessor
                     cancellationToken.ThrowIfCancellationRequested();
                     try
                     {
-                        ExtractionResult pageResult = await engine.ExtractAsync(
+                        OcrRun pageResult = await ExtractWithFallbackAsync(engine, fallback,
                             page.PngBytes, "image/png", cancellationToken).ConfigureAwait(false);
-                        if (pageResult.CleanText.Length > 0)
-                            ocrSegments.Add(new SegmentDraft(pageResult.RawText, PageNumber: page.PageNumber));
+                        usedFallback |= pageResult.UsedFallback;
+                        if (pageResult.Result.CleanText.Length > 0)
+                            ocrSegments.Add(new SegmentDraft(pageResult.Result.RawText, PageNumber: page.PageNumber));
                     }
                     finally
                     {
@@ -218,11 +226,26 @@ static class OcrAttachmentProcessor
         ExtractionResult merged = ExtractionResultBuilder.Build(detected.MimeType,
             textSegments.Concat(ocrSegments).OrderBy(segment => segment.PageNumber),
             new TextExtractionOptions());
-        return merged with
+        return new OcrRun(merged with
         {
             WasTruncated = merged.WasTruncated || textResult.WasTruncated,
             OcrPageNumbers = [],
-        };
+        }, usedFallback);
+    }
+
+    static async Task<OcrRun> ExtractWithFallbackAsync(TesseractOcrEngine primary,
+        PaddleOcrEngine? fallback, byte[] image, string mimeType, CancellationToken cancellationToken)
+    {
+        ExtractionResult primaryResult = await primary.ExtractAsync(image, mimeType, cancellationToken)
+            .ConfigureAwait(false);
+        if (primaryResult.CleanText.Length > 0 || fallback is null)
+            return new OcrRun(primaryResult, false);
+
+        ExtractionResult fallbackResult = await fallback.ExtractAsync(image, mimeType, cancellationToken)
+            .ConfigureAwait(false);
+        return fallbackResult.CleanText.Length == 0
+            ? new OcrRun(primaryResult, false)
+            : new OcrRun(fallbackResult, true);
     }
 
     static void Zero(IEnumerable<RenderedPdfPage> pages)
@@ -230,4 +253,6 @@ static class OcrAttachmentProcessor
         foreach (RenderedPdfPage page in pages)
             CryptographicOperations.ZeroMemory(page.PngBytes);
     }
+
+    sealed record OcrRun(ExtractionResult Result, bool UsedFallback);
 }

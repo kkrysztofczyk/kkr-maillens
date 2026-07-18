@@ -64,6 +64,17 @@ run\KKR.MailLens.exe processing-run
 OCR przekazuje obrazy przez pamięć i strumienie procesu, bez jawnego pliku tymczasowego. Worker automatycznie renderuje przez PDFium tylko strony PDF bez użytecznej warstwy tekstowej, grupując je w ograniczone batche (domyślnie po 4), zeruje wykorzystane bufory PNG, scala wynik według numerów stron i aktualizuje indeks FTS5.
 Uruchomienie przez `processing-run` nakłada ograniczony token Windows, izolację interfejsu Job Object oraz limit pamięci na Workera i procesy potomne. Ograniczenia są aktywne przed wznowieniem procesu, a Worker uruchomiony bez launchera odmawia pracy. Ctrl+C lub zablokowanie sesji bezpiecznie zwraca aktywne zadanie do kolejki.
 
+Dla trudnych obrazów można opcjonalnie włączyć lokalny PaddleOCR. Jest uruchamiany wyłącznie po pustym wyniku Tesseracta i nie nadpisuje tekstu rozpoznanego przez pierwszy silnik:
+
+```powershell
+py -3.12 -m venv .tools\paddleocr
+.tools\paddleocr\Scripts\python.exe -m pip install paddlepaddle==3.2.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+.tools\paddleocr\Scripts\python.exe -m pip install paddleocr
+run\KKR.MailLens.exe config --paddleocr-enabled true --paddleocr-python "$PWD\.tools\paddleocr\Scripts\python.exe" --paddleocr-language pl --paddleocr-version PP-OCRv6 --paddleocr-device cpu
+```
+
+Adapter jest publikowany razem z Workerem w `run\tools\paddleocr_runner.py`. Pierwsze użycie może pobrać model do lokalnego cache; obraz jest przetwarzany lokalnie i przekazywany do Pythona przez pamięć.
+
 ## Lokalna transkrypcja
 
 Po zainstalowaniu FFmpeg, `whisper-cli` i wielojęzycznego modelu whisper.cpp:
