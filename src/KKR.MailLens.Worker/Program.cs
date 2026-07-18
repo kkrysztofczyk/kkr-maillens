@@ -41,18 +41,28 @@ try
             return Volatile.Read(ref sessionLocked) == 1 ? 2 : 130;
         ProcessingJob? job = ProcessingJobRepository.LeaseNext(connection, workerId, leaseDuration);
         if (job is null) break;
+        await using var jobLease = ProcessingLeaseMonitor.Start(() =>
+        {
+            using SqliteConnection heartbeatConnection = Db.Open(key, create: false);
+            return ProcessingJobRepository.RenewLease(
+                heartbeatConnection, job.Id, workerId, leaseDuration);
+        }, leaseDuration, shutdown.Token);
         try
         {
+            jobLease.AssertActive();
             switch (job.JobType)
             {
                 case "download":
-                    await DownloadAsync(connection, store, outlookBroker, job, key, shutdown.Token);
+                    await DownloadAsync(connection, store, outlookBroker, job, key, jobLease.Token,
+                        jobLease.AssertActive);
                     break;
                 case "extract":
                     if (job.AttachmentId is null || job.DocumentId is null)
                         throw new InvalidDataException("Zadanie ekstrakcji nie wskazuje dokumentu i załącznika.");
                     AttachmentExtractionOutcome outcome = AttachmentExtractionProcessor.Process(
-                        connection, store, job.AttachmentId.Value, job.DocumentId.Value);
+                        connection, store, job.AttachmentId.Value, job.DocumentId.Value,
+                        jobLease.Token, jobLease.AssertActive);
+                    jobLease.AssertActive();
                     if (outcome.Status == "needs-ocr" && (outcome.DetectedMimeType == "application/pdf"
                         || outcome.DetectedMimeType.StartsWith("image/", StringComparison.Ordinal)))
                         ProcessingJobRepository.Enqueue(connection, "ocr", job.AttachmentId.Value, job.DocumentId.Value);
@@ -68,32 +78,23 @@ try
                     int ocrTimeoutSeconds = Math.Clamp(config.OcrTimeoutSeconds, 10, 3600);
                     int renderTimeoutSeconds = Math.Clamp(config.OcrPdfRenderTimeoutSeconds, 10, 3600);
                     int paddleTimeoutSeconds = Math.Clamp(config.PaddleOcrTimeoutSeconds, 10, 3600);
-                    TimeSpan ocrLeaseDuration = TimeSpan.FromSeconds(
-                        Math.Max(Math.Max(ocrTimeoutSeconds, renderTimeoutSeconds),
-                            config.PaddleOcrEnabled ? paddleTimeoutSeconds : 0) + 60);
                     PaddleOcrOptions? paddleOptions = config.PaddleOcrEnabled
                         ? new PaddleOcrOptions(config.PaddleOcrPythonPath, config.PaddleOcrRunnerPath,
                             config.PaddleOcrLanguage, config.PaddleOcrModelVersion, config.PaddleOcrDevice,
                             Math.Clamp(config.PaddleOcrMinimumConfidence, 0, 1),
                             TimeSpan.FromSeconds(paddleTimeoutSeconds))
                         : null;
-                    if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, ocrLeaseDuration))
-                        throw new InvalidOperationException("Worker utracił lease zadania OCR.");
                     await OcrAttachmentProcessor.ProcessAsync(connection, store, job.AttachmentId.Value,
                         job.DocumentId.Value, new TesseractOptions(config.TesseractPath, config.OcrLanguages,
-                            TimeSpan.FromSeconds(ocrTimeoutSeconds)), shutdown.Token,
+                            TimeSpan.FromSeconds(ocrTimeoutSeconds)), jobLease.Token,
                         pdfOptions: new PdfRenderOptions(
                             Math.Clamp(config.OcrPdfDpi, 72, 600),
                             Math.Clamp(config.OcrMaxPdfPages, 1, 10_000),
                             TimeSpan.FromSeconds(renderTimeoutSeconds),
                             Math.Clamp(config.OcrPdfBatchSize, 1, 16)),
-                        heartbeat: () =>
-                        {
-                            shutdown.Token.ThrowIfCancellationRequested();
-                            if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, ocrLeaseDuration))
-                                throw new InvalidOperationException("Worker utracił lease zadania OCR.");
-                        },
+                        heartbeat: jobLease.AssertActive,
                         fallbackOptions: paddleOptions);
+                    jobLease.AssertActive();
                     EnqueueSemanticIfEnabled(connection, job.AttachmentId.Value, job.DocumentId.Value);
                     break;
                 case "transcribe":
@@ -104,10 +105,6 @@ try
                     int whisperTimeoutSeconds = Math.Clamp(transcriptionConfig.WhisperTimeoutSeconds, 30, 24 * 3600);
                     bool hasWhisperFallback = !string.IsNullOrWhiteSpace(
                         transcriptionConfig.WhisperFallbackModelPath);
-                    TimeSpan transcriptionLeaseDuration = TimeSpan.FromSeconds(
-                        ffmpegTimeoutSeconds + whisperTimeoutSeconds * (hasWhisperFallback ? 2 : 1) + 60);
-                    if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, transcriptionLeaseDuration))
-                        throw new InvalidOperationException("Worker utracił lease zadania transkrypcji.");
                     var transcriptionOptions = new MediaTranscriptionOptions(
                         transcriptionConfig.FfmpegPath, transcriptionConfig.WhisperPath,
                         transcriptionConfig.WhisperModelPath, transcriptionConfig.WhisperLanguage,
@@ -116,13 +113,9 @@ try
                         FallbackModelPath: hasWhisperFallback
                             ? transcriptionConfig.WhisperFallbackModelPath : null);
                     await MediaTranscriptionProcessor.ProcessAsync(connection, store, job.AttachmentId.Value,
-                        job.DocumentId.Value, new FfmpegWhisperTranscriber(transcriptionOptions), shutdown.Token,
-                        heartbeat: () =>
-                        {
-                            shutdown.Token.ThrowIfCancellationRequested();
-                            if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, transcriptionLeaseDuration))
-                                throw new InvalidOperationException("Worker utracił lease zadania transkrypcji.");
-                        });
+                        job.DocumentId.Value, new FfmpegWhisperTranscriber(transcriptionOptions), jobLease.Token,
+                        heartbeat: jobLease.AssertActive);
+                    jobLease.AssertActive();
                     EnqueueSemanticIfEnabled(connection, job.AttachmentId.Value, job.DocumentId.Value);
                     break;
                 case "embed":
@@ -130,27 +123,19 @@ try
                         throw new InvalidDataException("Zadanie embeddingu nie wskazuje dokumentu.");
                     AppConfig semanticConfig = AppConfig.Load();
                     if (!semanticConfig.SemanticEnabled) break;
-                    TimeSpan semanticLease = TimeSpan.FromSeconds(
-                        Math.Clamp(semanticConfig.EmbeddingTimeoutSeconds, 10, 3600) + 60);
-                    if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, semanticLease))
-                        throw new InvalidOperationException("Worker utracił lease zadania embeddingu.");
                     using (IEmbeddingProvider provider = SemanticServices.CreateProvider(semanticConfig))
                     {
                         await SemanticIndex.IndexAsync(connection, provider,
                             Math.Clamp(semanticConfig.EmbeddingBatchSize, 1, 64), job.DocumentId.Value,
-                            cancellationToken: shutdown.Token,
-                            heartbeat: () =>
-                            {
-                                shutdown.Token.ThrowIfCancellationRequested();
-                                if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, semanticLease))
-                                    throw new InvalidOperationException("Worker utracił lease zadania embeddingu.");
-                            });
+                            cancellationToken: jobLease.Token,
+                            heartbeat: jobLease.AssertActive);
                     }
                     break;
                 default:
                     throw new NotSupportedException($"Nieobsługiwany typ zadania: {job.JobType}");
             }
-            shutdown.Token.ThrowIfCancellationRequested();
+            jobLease.AssertActive();
+            await jobLease.StopAsync();
             if (!ProcessingJobRepository.Complete(connection, job.Id, workerId))
             {
                 Console.Error.WriteLine($"lost lease job={job.Id} type={job.JobType}");
@@ -158,8 +143,15 @@ try
             }
             Console.WriteLine($"completed job={job.Id} type={job.JobType}");
         }
+        catch (OperationCanceledException) when (jobLease.LostLease)
+        {
+            await jobLease.StopAsync();
+            Console.Error.WriteLine($"lost lease job={job.Id} type={job.JobType}");
+            return 3;
+        }
         catch (OperationCanceledException) when (shutdown.IsCancellationRequested)
         {
+            await jobLease.StopAsync();
             if (!ProcessingJobRepository.Abandon(connection, job.Id, workerId))
             {
                 Console.Error.WriteLine($"lost lease job={job.Id} type={job.JobType}");
@@ -170,6 +162,12 @@ try
         }
         catch (Exception ex)
         {
+            await jobLease.StopAsync();
+            if (jobLease.LostLease)
+            {
+                Console.Error.WriteLine($"lost lease job={job.Id} type={job.JobType}");
+                return 3;
+            }
             if (!ProcessingJobRepository.Fail(connection, job.Id, workerId, ex.GetType().Name,
                 ex.Message, TimeSpan.FromMinutes(1)))
             {
@@ -195,8 +193,9 @@ finally
 
 static async Task DownloadAsync(Microsoft.Data.Sqlite.SqliteConnection connection, EncryptedBlobStore store,
     OutlookAttachmentBroker outlookBroker, ProcessingJob job, string sessionKeyHex,
-    CancellationToken cancellationToken)
+    CancellationToken cancellationToken, Action heartbeat)
 {
+    Checkpoint(cancellationToken, heartbeat);
     if (job.AttachmentId is null) throw new InvalidDataException("Zadanie pobierania nie wskazuje załącznika.");
     MailAttachmentRepository.Item item = MailAttachmentRepository.Get(connection, job.AttachmentId.Value);
     DownloadedAttachment downloaded = item.Provider switch
@@ -208,16 +207,27 @@ static async Task DownloadAsync(Microsoft.Data.Sqlite.SqliteConnection connectio
     };
     try
     {
+        Checkpoint(cancellationToken, heartbeat);
         StoredBlob blob = store.Put(connection, downloaded.Bytes);
+        Checkpoint(cancellationToken, heartbeat);
         MailAttachmentRepository.MarkDownloaded(connection, item.Id, blob, downloaded.DetectedMimeType);
+        Checkpoint(cancellationToken, heartbeat);
         long documentId = ContentDocumentRepository.EnsureAttachmentDocument(
             connection, item.Id, blob.Sha256, downloaded.DetectedMimeType);
+        Checkpoint(cancellationToken, heartbeat);
         ProcessingJobRepository.Enqueue(connection, "extract", item.Id, documentId);
     }
     finally
     {
         System.Security.Cryptography.CryptographicOperations.ZeroMemory(downloaded.Bytes);
     }
+}
+
+static void Checkpoint(CancellationToken cancellationToken, Action heartbeat)
+{
+    cancellationToken.ThrowIfCancellationRequested();
+    heartbeat();
+    cancellationToken.ThrowIfCancellationRequested();
 }
 
 static async Task<DownloadedAttachment> DownloadGmailAsync(

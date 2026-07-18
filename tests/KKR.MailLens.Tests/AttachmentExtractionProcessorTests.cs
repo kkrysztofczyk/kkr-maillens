@@ -77,6 +77,37 @@ public sealed class AttachmentExtractionProcessorTests
         }
     }
 
+    [TestMethod]
+    public void Process_LostLeaseAfterExtractionDoesNotPersistResult()
+    {
+        using var db = new TestDatabase();
+        string storeDirectory = Path.Combine(Path.GetTempPath(), "kkr-maillens-tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            long attachmentId = AddAttachment(db);
+            var store = new EncryptedBlobStore(storeDirectory, new string('D', 64));
+            StoredBlob blob = store.Put(db.Connection, Encoding.UTF8.GetBytes("Neutralny tekst wiadomości"));
+            MailAttachmentRepository.MarkDownloaded(db.Connection, attachmentId, blob, "text/plain");
+            long documentId = ContentDocumentRepository.EnsureAttachmentDocument(
+                db.Connection, attachmentId, blob.Sha256, "text/plain");
+            int checkpoints = 0;
+
+            Assert.Throws<ProcessingLeaseLostException>(() => AttachmentExtractionProcessor.Process(
+                db.Connection, store, attachmentId, documentId, heartbeat: () =>
+                {
+                    if (Interlocked.Increment(ref checkpoints) == 3)
+                        throw new ProcessingLeaseLostException("Testowa utrata dzierżawy.");
+                }));
+
+            Assert.AreEqual("pending", db.ScalarText("SELECT status FROM content_documents;"));
+            Assert.AreEqual(0, db.ScalarLong("SELECT count(*) FROM content_segments;"));
+        }
+        finally
+        {
+            try { Directory.Delete(storeDirectory, recursive: true); } catch { }
+        }
+    }
+
     static long AddAttachment(TestDatabase db)
     {
         GmailAccountRecord account = db.AddAccount();

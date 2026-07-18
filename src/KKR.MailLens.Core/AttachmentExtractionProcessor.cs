@@ -8,14 +8,17 @@ sealed record AttachmentExtractionOutcome(string Status, string DetectedMimeType
 static class AttachmentExtractionProcessor
 {
     public static AttachmentExtractionOutcome Process(SqliteConnection connection, EncryptedBlobStore store,
-        long attachmentId, long documentId)
+        long attachmentId, long documentId, CancellationToken cancellationToken = default,
+        Action? heartbeat = null)
     {
+        Checkpoint(cancellationToken, heartbeat);
         MailAttachmentRepository.Item item = MailAttachmentRepository.Get(connection, attachmentId);
         StoredBlob blob = EncryptedBlobStore.Get(connection,
             item.BlobId ?? throw new InvalidOperationException("Załącznik nie ma pobranego blobu."));
         byte[] plaintext = store.Read(blob);
         try
         {
+            Checkpoint(cancellationToken, heartbeat);
             DetectedFile detected = FileTypeDetector.Detect(item.Filename, item.MimeType, plaintext);
             ExtractionResult result;
             try
@@ -28,9 +31,11 @@ static class AttachmentExtractionProcessor
             }
             catch (NotSupportedException ex)
             {
+                Checkpoint(cancellationToken, heartbeat);
                 ContentDocumentRepository.MarkSkipped(connection, documentId, "unsupported-type", ex.Message);
                 return new AttachmentExtractionOutcome("skipped", detected.MimeType);
             }
+            Checkpoint(cancellationToken, heartbeat);
             string status = ContentDocumentRepository.SaveExtraction(
                 connection, documentId, result, ExtractorName(result), "1");
             return new AttachmentExtractionOutcome(status, result.DetectedMimeType);
@@ -39,6 +44,13 @@ static class AttachmentExtractionProcessor
         {
             CryptographicOperations.ZeroMemory(plaintext);
         }
+    }
+
+    static void Checkpoint(CancellationToken cancellationToken, Action? heartbeat)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        heartbeat?.Invoke();
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     static string ExtractorName(ExtractionResult result) => result.DetectedMimeType switch

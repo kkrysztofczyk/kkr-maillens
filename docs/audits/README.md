@@ -43,6 +43,7 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Worker jest tworzony jako wstrzymany z ograniczonym tokenem Windows, po czym przed wznowieniem trafia do Job Object z limitami interfejsu i łącznym limitem pamięci obejmującym procesy potomne.
 - Bezpośrednie uruchomienie Workera jest odrzucane, jeżeli proces nie ma ograniczonego tokenu.
 - Ctrl+C i utrata odblokowanej sesji anulują operacje zewnętrzne; zadanie wraca do kolejki bez zużycia próby.
+- Wszystkie typy zadań Workera mają niezależny heartbeat dzierżawy; utrata własności anuluje pracę, a ekstrakcja sprawdza ją ponownie przed zapisem wyniku.
 - Odzyskanie wygasłego lease zachowuje wcześniejszy kod diagnostyczny, jeżeli zadanie już go miało.
 - Działa lokalny pipeline FFmpeg → whisper.cpp z timestampami segmentów, FTS5 i sprzątaniem jawnych plików roboczych.
 - Garbage collection usuwa wyłącznie bloby bez aktywnych referencji, zachowuje współdzielone bloby i pomija dane używane przez działające zadania.
