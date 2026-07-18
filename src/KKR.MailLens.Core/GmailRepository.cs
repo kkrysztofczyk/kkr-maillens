@@ -91,22 +91,30 @@ static class GmailRepository
 
     public static GmailSaveBatchResult SaveMessages(SqliteConnection c, long generation, IReadOnlyList<GmailStoredMessage> messages)
     {
+        using var transaction = c.BeginTransaction();
+        GmailSaveBatchResult result = SaveMessages(c, transaction, generation, messages);
+        transaction.Commit();
+        return result;
+    }
+
+    internal static GmailSaveBatchResult SaveMessages(SqliteConnection c, SqliteTransaction transaction,
+        long generation, IReadOnlyList<GmailStoredMessage> messages)
+    {
         long inserted = 0, updated = 0;
         var saved = new List<GmailStoredMessage>();
         var failed = new List<string>();
         string now = Now();
 
-        using var tx = c.BeginTransaction();
         foreach (var message in messages)
         {
-            Exec(c, tx, "SAVEPOINT gmail_message;");
+            Exec(c, transaction, "SAVEPOINT gmail_message;");
             try
             {
-                long? existingId = ScalarLong(c, tx,
+                long? existingId = ScalarLong(c, transaction,
                     "SELECT id FROM messages WHERE account_id=$account AND gmail_message_id=$gmail;",
                     ("$account", message.AccountId), ("$gmail", message.GmailMessageId));
 
-                using (var upsert = Command(c, tx, """
+                using (var upsert = Command(c, transaction, """
                     INSERT INTO messages(account_id,gmail_message_id,gmail_thread_id,rfc_message_id,internal_date,sent_at,
                         sender,recipients,cc,bcc,subject,body_text,body_html,is_unread,is_trashed,is_spam,
                         has_attachments,size_bytes,created_at,updated_at,last_seen_generation)
@@ -131,31 +139,31 @@ static class GmailRepository
                     ("$now", now), ("$generation", generation)))
                     upsert.ExecuteNonQuery();
 
-                long messageId = existingId ?? ScalarLong(c, tx,
+                long messageId = existingId ?? ScalarLong(c, transaction,
                     "SELECT id FROM messages WHERE account_id=$account AND gmail_message_id=$gmail;",
                     ("$account", message.AccountId), ("$gmail", message.GmailMessageId))
                     ?? throw new InvalidOperationException("Brak lokalnego identyfikatora wiadomosci.");
 
-                Exec(c, tx, "DELETE FROM message_labels WHERE message_id=$message;", ("$message", messageId));
+                Exec(c, transaction, "DELETE FROM message_labels WHERE message_id=$message;", ("$message", messageId));
                 foreach (string labelId in message.LabelIds.Distinct(StringComparer.Ordinal))
                 {
-                    using (var ensure = Command(c, tx, """
+                    using (var ensure = Command(c, transaction, """
                         INSERT INTO labels(account_id,gmail_label_id,name,label_type)
                         VALUES($account,$label,$label,'unknown')
                         ON CONFLICT(account_id,gmail_label_id) DO NOTHING;
                         """, ("$account", message.AccountId), ("$label", labelId)))
                         ensure.ExecuteNonQuery();
-                    long localLabelId = ScalarLong(c, tx,
+                    long localLabelId = ScalarLong(c, transaction,
                         "SELECT id FROM labels WHERE account_id=$account AND gmail_label_id=$label;",
                         ("$account", message.AccountId), ("$label", labelId))!.Value;
-                    Exec(c, tx, "INSERT OR IGNORE INTO message_labels(message_id,label_id) VALUES($message,$label);",
+                    Exec(c, transaction, "INSERT OR IGNORE INTO message_labels(message_id,label_id) VALUES($message,$label);",
                         ("$message", messageId), ("$label", localLabelId));
                 }
 
-                Exec(c, tx, "UPDATE attachments SET is_deleted=1 WHERE message_id=$message;", ("$message", messageId));
+                Exec(c, transaction, "UPDATE attachments SET is_deleted=1 WHERE message_id=$message;", ("$message", messageId));
                 foreach (var attachment in message.Attachments)
                 {
-                    using var insertAttachment = Command(c, tx, """
+                    using var insertAttachment = Command(c, transaction, """
                         INSERT INTO attachments(message_id,gmail_attachment_id,part_id,filename,mime_type,size_bytes,
                             download_status,index_status,is_deleted,last_seen_generation)
                         VALUES($message,$gmail,$part,$filename,$mime,$size,'metadata-only','not-indexed',0,$generation)
@@ -171,19 +179,18 @@ static class GmailRepository
                     insertAttachment.ExecuteNonQuery();
                 }
 
-                Exec(c, tx, "RELEASE SAVEPOINT gmail_message;");
+                Exec(c, transaction, "RELEASE SAVEPOINT gmail_message;");
                 if (existingId.HasValue) updated++; else inserted++;
                 saved.Add(message);
             }
             catch (Exception ex)
             {
-                Exec(c, tx, "ROLLBACK TO SAVEPOINT gmail_message;");
-                Exec(c, tx, "RELEASE SAVEPOINT gmail_message;");
+                Exec(c, transaction, "ROLLBACK TO SAVEPOINT gmail_message;");
+                Exec(c, transaction, "RELEASE SAVEPOINT gmail_message;");
                 failed.Add(message.GmailMessageId);
-                InsertError(c, tx, message.AccountId, message.GmailMessageId, "database", ex.GetType().Name);
+                InsertError(c, transaction, message.AccountId, message.GmailMessageId, "database", ex.GetType().Name);
             }
         }
-        tx.Commit();
         return new GmailSaveBatchResult(inserted, updated, saved, failed);
     }
 

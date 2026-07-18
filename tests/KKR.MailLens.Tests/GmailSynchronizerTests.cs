@@ -137,4 +137,41 @@ public sealed class GmailSynchronizerTests
         Assert.AreEqual(1, GmailRepository.MessageCount(db.Connection, account.Id));
         Assert.AreEqual(1, GmailRepository.ErrorCount(db.Connection, account.Id));
     }
+
+    [TestMethod]
+    public async Task PageSave_RollsBackMessageCorpusAttachmentAndJobTogether()
+    {
+        using var db = new TestDatabase();
+        GmailAccountRecord account = db.AddAccount();
+        using (var trigger = db.Connection.CreateCommand())
+        {
+            trigger.CommandText = """
+                CREATE TRIGGER reject_mail_attachment BEFORE INSERT ON mail_attachments
+                BEGIN SELECT RAISE(ABORT,'neutral test rollback'); END;
+                """;
+            trigger.ExecuteNonQuery();
+        }
+
+        var part = new GmailApiPart
+        {
+            PartId = "2",
+            MimeType = "application/pdf",
+            Filename = "record.pdf",
+            AttachmentId = "attachment-1",
+            Size = 123,
+            Headers = [new GmailHeader("Content-Disposition", "attachment")],
+        };
+        using var api = new FakeGmailApiClient();
+        api.Messages["m1"] = GmailTestMessage.Create("m1", extraParts: [part]);
+        api.MessagePages[""] = () => new GmailMessagePage(["m1"], null);
+
+        await Assert.ThrowsAsync<Microsoft.Data.Sqlite.SqliteException>(async () =>
+            await new GmailSynchronizer(db.Connection, api).SyncAsync(account, false, CancellationToken.None));
+
+        Assert.AreEqual(0, db.ScalarLong("SELECT count(*) FROM messages;"));
+        Assert.AreEqual(0, db.ScalarLong("SELECT count(*) FROM mails;"));
+        Assert.AreEqual(0, db.ScalarLong("SELECT count(*) FROM mails_fts;"));
+        Assert.AreEqual(0, db.ScalarLong("SELECT count(*) FROM mail_attachments;"));
+        Assert.AreEqual(0, db.ScalarLong("SELECT count(*) FROM processing_jobs;"));
+    }
 }

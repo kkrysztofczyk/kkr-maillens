@@ -28,13 +28,13 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Ochrona przed path traversal blobów ma test regresyjny.
 - Tokeny Gmail i hasła IMAP są związane z kluczem aktywnej sesji przez AES-GCM, a następnie chronione przez DPAPI `CurrentUser`.
 - Starsze poświadczenia DPAPI-only są migrowane po odblokowaniu; ponowna inicjalizacja usuwa sekrety i bloby poprzedniego korpusu.
-- Zestaw testów wzrósł z historycznych 20/31 do 60 testów.
+- Zapis strony Gmail obejmuje jedną transakcją wiadomości, korpus/FTS, metadane załączników i enqueue.
+- Zadanie `download` powstaje wyłącznie dla załącznika w stanie `metadata-only`; ponowny upsert nie przetwarza gotowej treści.
+- Zestaw testów wzrósł z historycznych 20/31 do 61 testów.
 
 ### Otwarte — priorytet
 
-- Rozważyć jedną transakcję dla zapisu wiadomości, korpusu, metadanych załączników i enqueue strony synchronizacji.
 - Utwardzić Worker przetwarzający niezaufane dokumenty: limity zasobów i uprawnień oraz testy złośliwych PDF/OOXML.
-- Enqueue `download` tylko dla załączników `metadata-only` — obecnie każdy upsert ponawia pobieranie i re-ekstrakcję już przetworzonych załączników.
 - Pusta strona skanu (pusty wynik Tesseracta) nie powinna wywalać całego dokumentu OCR do `failed` — pomijać stronę / zapisywać pusty segment.
 
 ### Otwarte — roadmapa
@@ -43,7 +43,6 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Status `unsupported`/`skipped` dla typów bez ekstraktora zamiast szumu w `failed`.
 - Renderowanie stron PDF do OCR w batchach (dziś każdy `RenderAsync` parsuje dokument od nowa).
 - Graceful shutdown workera (`Console.CancelKeyPress` → `CancellationTokenSource`).
-- Sweep naprawczy: enqueue `download` dla `metadata-only` bez aktywnego zadania (crash między commitem a enqueue).
 - Garbage collection zaszyfrowanych blobów bez referencji.
 - Testy odbudowy FTS i współdzielonych blobów.
 - Obsługa Gmaila i wyników `content_fts` w GUI.

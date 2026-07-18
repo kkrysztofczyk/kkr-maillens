@@ -13,12 +13,14 @@ public sealed class MailAttachmentRepositoryTests
         GmailStoredMessage first = Message(account.Id, 321);
         Corpus.Upsert(db.Connection, [GmailMessageMapper.ToHarvested(first)], "2026-01-01 00:00:00");
         MailAttachmentRepository.UpsertGmail(db.Connection, 1, [first]);
+        Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM processing_jobs WHERE job_type='download';"));
 
         using (var processed = db.Connection.CreateCommand())
         {
             processed.CommandText = """
                 UPDATE mail_attachments SET download_status='downloaded', processing_status='indexed',
                     blob_id=9, error_code='retained', error_message='retained';
+                UPDATE processing_jobs SET status='completed',completed_at='2026-01-01T00:00:00Z';
                 """;
             processed.ExecuteNonQuery();
         }
@@ -30,6 +32,7 @@ public sealed class MailAttachmentRepositoryTests
         Assert.AreEqual("downloaded", db.ScalarText("SELECT download_status FROM mail_attachments;"));
         Assert.AreEqual("indexed", db.ScalarText("SELECT processing_status FROM mail_attachments;"));
         Assert.AreEqual(9, db.ScalarLong("SELECT blob_id FROM mail_attachments;"));
+        Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM processing_jobs WHERE job_type='download';"));
 
         GmailStoredMessage changed = Message(account.Id, 654, "updated-record.pdf");
         MailAttachmentRepository.UpsertGmail(db.Connection, 3, [changed]);
@@ -37,6 +40,7 @@ public sealed class MailAttachmentRepositoryTests
         Assert.AreEqual("pending", db.ScalarText("SELECT processing_status FROM mail_attachments;"));
         Assert.AreEqual(0, db.ScalarLong("SELECT count(*) FROM mail_attachments WHERE blob_id IS NOT NULL;"));
         Assert.AreEqual(0, db.ScalarLong("SELECT count(*) FROM mail_attachments WHERE error_code IS NOT NULL OR error_message IS NOT NULL;"));
+        Assert.AreEqual(2, db.ScalarLong("SELECT count(*) FROM processing_jobs WHERE job_type='download';"));
 
         GmailStoredMessage missing = GmailMessageMapper.Map(GmailTestMessage.Create("m1"), account.Id);
         MailAttachmentRepository.UpsertGmail(db.Connection, 4, [missing]);

@@ -10,14 +10,24 @@ static class Corpus
 
     public static Stats Upsert(SqliteConnection c, IEnumerable<HarvestedMail> mails, string harvestedAt)
     {
+        using var transaction = c.BeginTransaction();
+        Stats result = Upsert(c, transaction, mails, harvestedAt);
+        transaction.Commit();
+        return result;
+    }
+
+    internal static Stats Upsert(SqliteConnection c, SqliteTransaction transaction,
+        IEnumerable<HarvestedMail> mails, string harvestedAt)
+    {
         int ins = 0, upd = 0;
-        using var tx = c.BeginTransaction();
 
         using var exists = c.CreateCommand();
+        exists.Transaction = transaction;
         exists.CommandText = "SELECT rowid FROM mails WHERE entry_id=$id;";
         var pExId = exists.CreateParameter(); pExId.ParameterName = "$id"; exists.Parameters.Add(pExId);
 
         using var up = c.CreateCommand();
+        up.Transaction = transaction;
         up.CommandText = """
             INSERT INTO mails(entry_id,store_id,folder_path,folder_leaf,conversation_id,received,sent,
                 sender_name,sender_email,to_recips,cc_recips,subject,body,has_attachments,attachment_names,
@@ -41,10 +51,12 @@ static class Corpus
         { var pp = up.CreateParameter(); pp.ParameterName = "$" + n; up.Parameters.Add(pp); p[n] = pp; }
 
         using var ftsDel = c.CreateCommand();
+        ftsDel.Transaction = transaction;
         ftsDel.CommandText = "DELETE FROM mails_fts WHERE rowid=$rid;";
         var pDelRid = ftsDel.CreateParameter(); pDelRid.ParameterName = "$rid"; ftsDel.Parameters.Add(pDelRid);
 
         using var ftsIns = c.CreateCommand();
+        ftsIns.Transaction = transaction;
         ftsIns.CommandText = "INSERT INTO mails_fts(rowid,subject,body,sender,recips) VALUES($rid,$subject,$body,$sender,$recips);";
         var fRid = ftsIns.CreateParameter(); fRid.ParameterName = "$rid"; ftsIns.Parameters.Add(fRid);
         var fSub = ftsIns.CreateParameter(); fSub.ParameterName = "$subject"; ftsIns.Parameters.Add(fSub);
@@ -54,6 +66,7 @@ static class Corpus
 
         // rowid dla nowego wiersza bez powtornego SELECT WHERE entry_id (b-tree probe) - INSERT wlasnie go nadal.
         using var lastId = c.CreateCommand();
+        lastId.Transaction = transaction;
         lastId.CommandText = "SELECT last_insert_rowid();";
 
         foreach (var m in mails)
@@ -98,14 +111,17 @@ static class Corpus
             if (isNew) ins++; else upd++;
         }
 
-        SetMeta(c, "last_harvest", harvestedAt);
-        tx.Commit();
+        SetMeta(c, transaction, "last_harvest", harvestedAt);
         return new(ins, upd);
     }
 
     public static void SetMeta(SqliteConnection c, string k, string v)
+        => SetMeta(c, null, k, v);
+
+    static void SetMeta(SqliteConnection c, SqliteTransaction? transaction, string k, string v)
     {
         using var cmd = c.CreateCommand();
+        cmd.Transaction = transaction;
         cmd.CommandText = "INSERT INTO meta(k,v) VALUES($k,$v) ON CONFLICT(k) DO UPDATE SET v=excluded.v;";
         var pk = cmd.CreateParameter(); pk.ParameterName = "$k"; pk.Value = k; cmd.Parameters.Add(pk);
         var pv = cmd.CreateParameter(); pv.ParameterName = "$v"; pv.Value = v; cmd.Parameters.Add(pv);

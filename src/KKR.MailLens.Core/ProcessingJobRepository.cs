@@ -33,10 +33,16 @@ static class ProcessingJobRepository
 
     public static bool Enqueue(SqliteConnection connection, string jobType, long? attachmentId,
         long? documentId = null, int priority = 100, int maxAttempts = 3, DateTimeOffset? availableAt = null)
+        => Enqueue(connection, null, jobType, attachmentId, documentId, priority, maxAttempts, availableAt);
+
+    internal static bool Enqueue(SqliteConnection connection, SqliteTransaction? transaction,
+        string jobType, long? attachmentId, long? documentId = null, int priority = 100,
+        int maxAttempts = 3, DateTimeOffset? availableAt = null)
     {
         ValidateType(jobType);
         string now = Stamp(DateTimeOffset.UtcNow);
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             INSERT OR IGNORE INTO processing_jobs(job_type,attachment_id,document_id,status,priority,
                 attempts,max_attempts,available_at,created_at)

@@ -173,13 +173,18 @@ sealed class GmailSynchronizer
         foreach (var failure in failures)
             GmailRepository.RecordError(_database, account.Id, failure.MessageId, "download", failure.Code);
 
-        GmailSaveBatchResult saved = GmailRepository.SaveMessages(_database, account.SyncGeneration, mapped.ToArray());
-
-        if (saved.Saved.Count > 0)
+        GmailSaveBatchResult saved;
+        using (var transaction = _database.BeginTransaction())
         {
-            string stamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
-            Corpus.Upsert(_database, saved.Saved.Select(x => GmailMessageMapper.ToHarvested(x, labelNames)), stamp);
-            MailAttachmentRepository.UpsertGmail(_database, account.SyncGeneration, saved.Saved);
+            saved = GmailRepository.SaveMessages(_database, transaction, account.SyncGeneration, mapped.ToArray());
+            if (saved.Saved.Count > 0)
+            {
+                string stamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+                Corpus.Upsert(_database, transaction,
+                    saved.Saved.Select(x => GmailMessageMapper.ToHarvested(x, labelNames)), stamp);
+                MailAttachmentRepository.UpsertGmail(_database, transaction, account.SyncGeneration, saved.Saved);
+            }
+            transaction.Commit();
         }
 
         return new PageResult(saved.Inserted, saved.Updated, deleted, failures.Count + saved.FailedMessageIds.Count);

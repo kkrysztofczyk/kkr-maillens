@@ -12,9 +12,16 @@ static class MailAttachmentRepository
         IReadOnlyList<GmailStoredMessage> messages)
     {
         if (messages.Count == 0) return;
-        string now = DateTimeOffset.UtcNow.ToString("O");
-        var attachmentIds = new List<long>();
         using var transaction = connection.BeginTransaction();
+        UpsertGmail(connection, transaction, generation, messages);
+        transaction.Commit();
+    }
+
+    internal static void UpsertGmail(SqliteConnection connection, SqliteTransaction transaction,
+        long generation, IReadOnlyList<GmailStoredMessage> messages)
+    {
+        if (messages.Count == 0) return;
+        string now = DateTimeOffset.UtcNow.ToString("O");
         foreach (GmailStoredMessage message in messages)
         {
             Execute(connection, transaction, """
@@ -54,7 +61,7 @@ static class MailAttachmentRepository
                         is_deleted=0,
                         last_seen_generation=excluded.last_seen_generation,
                         updated_at=excluded.updated_at
-                    RETURNING id;
+                    RETURNING id,download_status;
                     """,
                     ("$mail", message.EntryId), ("$message", message.GmailMessageId),
                     ("$key", attachment.ProviderKey), ("$part", attachment.PartId),
@@ -62,12 +69,18 @@ static class MailAttachmentRepository
                     ("$size", attachment.SizeBytes), ("$content", attachment.ContentId),
                     ("$inline", attachment.IsInline ? 1 : 0), ("$data", attachment.InlineBase64Data),
                     ("$generation", generation), ("$now", now));
-                attachmentIds.Add(Convert.ToInt64(command.ExecuteScalar()));
+                long attachmentId;
+                string downloadStatus;
+                using (var reader = command.ExecuteReader())
+                {
+                    if (!reader.Read()) throw new InvalidOperationException("Nie zapisano metadanych załącznika.");
+                    attachmentId = reader.GetInt64(0);
+                    downloadStatus = reader.GetString(1);
+                }
+                if (downloadStatus == "metadata-only")
+                    ProcessingJobRepository.Enqueue(connection, transaction, "download", attachmentId);
             }
         }
-        transaction.Commit();
-        foreach (long attachmentId in attachmentIds)
-            ProcessingJobRepository.Enqueue(connection, "download", attachmentId);
     }
 
     public static Item Get(SqliteConnection connection, long id)
