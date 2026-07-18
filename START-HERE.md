@@ -8,7 +8,7 @@ KKR MailLens to lokalny, szyfrowany indeks poczty z wyszukiwaniem FTS5. Klucz ak
 2. Wpisz PIN, opcjonalnie włącz drugi składnik i kliknij `Inicjuj`.
 3. Kliknij `Odblokuj`.
 4. Kliknij `Harvest`, aby pobrać pocztę ze źródła desktopowego.
-5. Użyj pola `Szukaj`; alerty automatyczne są domyślnie odsiewane według lokalnych reguł.
+5. Użyj pola `Szukaj` i wybierz zakres `Wiadomości`, `Załączniki` albo `Wszystko`; alerty automatyczne są domyślnie odsiewane według lokalnych reguł.
 
 ## IMAP
 
@@ -23,7 +23,7 @@ run\KKR.MailLens.exe imap-harvest --account sender@example.invalid --since 2026-
 
 Włącz Gmail API i utwórz klienta OAuth typu Desktop app. Plik konfiguracji zapisz poza repozytorium jako `%LOCALAPPDATA%\kkr-maillens\gmail-oauth-client.json` albo wskaż zmienną `KKR_MAILLENS_GMAIL_OAUTH_CONFIG`. Po odblokowaniu GUI:
 
-Obsługa kont i synchronizacja Gmail są obecnie wykonywane z CLI; panel Gmail w GUI nie jest jeszcze dostępny.
+Kliknij `Gmail` w głównym oknie, aby połączyć lub odłączyć konto, wykonać synchronizację przyrostową albo pełną, obserwować postęp i kolejkę oraz uruchomić Workera. Te same operacje pozostają dostępne w CLI:
 
 ```powershell
 run\KKR.MailLens.exe account add gmail

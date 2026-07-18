@@ -40,6 +40,8 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Garbage collection usuwa wyłącznie bloby bez aktywnych referencji, zachowuje współdzielone bloby i pomija dane używane przez działające zadania.
 - Usunięcie osieroconego blobu czyści nieaktualne dokumenty, segmenty, FTS i zadania usuniętych załączników; `blob-gc --dry-run` udostępnia podgląd.
 - Test odbudowy `content_fts` potwierdza idempotentne odtworzenie indeksu z zapisanych segmentów.
+- GUI ma panel kont Gmail z OAuth, synchronizacją pełną/przyrostową, anulowaniem, statusem kolejki i uruchamianiem Workera.
+- Wyszukiwanie GUI przełącza się między wiadomościami, `content_fts` albo łączy oba rodzaje wyników.
 - Zestaw testów wzrósł z historycznych 20/31 do 74 testów.
 
 ### Otwarte — priorytet
@@ -49,5 +51,4 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 ### Otwarte — roadmapa
 
 - Renderowanie stron PDF do OCR w batchach (dziś każdy `RenderAsync` parsuje dokument od nowa).
-- Obsługa Gmaila i wyników `content_fts` w GUI.
 - Załączniki Outlook/IMAP oraz opcjonalne lokalne AI.

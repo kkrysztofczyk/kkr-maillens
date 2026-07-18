@@ -20,11 +20,13 @@ sealed class MainForm : Form
     readonly Button _unlock = Btn("Odblokuj");
     readonly Button _lock = Btn("Zablokuj");
     readonly TextBox _search = new() { Width = 200, Margin = new Padding(0, 6, 4, 0) };
+    readonly ComboBox _searchKind = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 105, Margin = new Padding(4, 6, 0, 0) };
     readonly Button _searchBtn = Btn("Szukaj");
     readonly Button _statsBtn = Btn("Statystyki");
     readonly ComboBox _range = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 90, Margin = new Padding(4, 6, 4, 0) };
     readonly Button _harvestBtn = Btn("Harvest");
     readonly Button _rulesBtn = Btn("Reguły szumu");
+    readonly Button _gmailBtn = Btn("Gmail");
 
     // Jednakowa szerokosc = przyciski tworza pionowe "tory"; staly rozmiar = brak drgania.
     const int BtnW = 100;
@@ -80,15 +82,16 @@ sealed class MainForm : Form
         _range.Anchor = AnchorStyles.Left | AnchorStyles.Right; _range.Margin = new Padding(0, 6, 0, 0);
         _ttl.Items.AddRange(new object[] { "5h", "12h", "24h" }); _ttl.SelectedIndex = 0;
         _range.Items.AddRange(new object[] { "3 dni", "Dzis", "Od ostatniego", "7 dni", "30 dni", "Ten rok", "Wszystko" }); _range.SelectedIndex = 0; // domyslnie 3 dni (zachodzi na siebie - brak dziur)
+        _searchKind.Items.AddRange(new object[] { "Wiadomości", "Załączniki", "Wszystko" }); _searchKind.SelectedIndex = 0;
 
         // srodek (col2): YubiKey w gorze, Szukaj+Statystyki w dole; reszta col2 to luz (Percent)
         var unlockMid = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0) };
         unlockMid.Controls.Add(_yubi);
         var searchMid = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0) };
-        searchMid.Controls.AddRange(new Control[] { _searchBtn, _statsBtn });
+        searchMid.Controls.AddRange(new Control[] { _searchKind, _searchBtn, _statsBtn });
 
         // strefa przyciskow: rowne kolumny wypelniaja stale 320px -> obie grupy tej samej szerokosci
-        foreach (var b in new[] { _init, _unlock, _lock, _harvestBtn, _rulesBtn })
+        foreach (var b in new[] { _init, _unlock, _lock, _harvestBtn, _rulesBtn, _gmailBtn })
         { b.Anchor = AnchorStyles.Left | AnchorStyles.Right; b.Margin = new Padding(2, 4, 2, 4); }
         static TableLayoutPanel BtnZone(int cols)
         {
@@ -97,7 +100,7 @@ sealed class MainForm : Form
             return t;
         }
         var unlockZone = BtnZone(3); unlockZone.Controls.AddRange(new Control[] { _init, _unlock, _lock });
-        var searchZone = BtnZone(2); searchZone.Controls.AddRange(new Control[] { _harvestBtn, _rulesBtn });
+        var searchZone = BtnZone(3); searchZone.Controls.AddRange(new Control[] { _harvestBtn, _gmailBtn, _rulesBtn });
 
         grid.Controls.Add(Lab("PIN:"), 0, 0);
         grid.Controls.Add(_pin, 1, 0);
@@ -120,11 +123,12 @@ sealed class MainForm : Form
         _init.Click += async (_, _) => await DoInit();
         _unlock.Click += async (_, _) => await DoUnlock();
         _lock.Click += (_, _) => { RamSession.Clear(); Session.Lock(); _pin.Clear(); RefreshStatus(); Log("Zablokowano - klucz usuniety z RAM."); };
-        _searchBtn.Click += async (_, _) => await RunCapture(() => Query.Run(RamSession.Key!, BuildQueryArgs()), "szukam...");
+        _searchBtn.Click += async (_, _) => await DoSearch();
         _statsBtn.Click += async (_, _) => await RunCapture(() => Query.Stats(RamSession.Key!), "statystyki...");
         _harvestBtn.Click += async (_, _) => await DoHarvest();
+        _gmailBtn.Click += (_, _) => OpenGmail();
         _rulesBtn.Click += async (_, _) => await OpenNoiseRules();
-        _search.KeyDown += async (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await RunCapture(() => Query.Run(RamSession.Key!, BuildQueryArgs()), "szukam..."); } };
+        _search.KeyDown += async (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await DoSearch(); } };
         _pin.KeyDown += async (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await DoUnlock(); } };
 
         Session.Lock(); // RAM-model: nic nie dziedziczymy z dysku, startujemy zablokowani
@@ -346,6 +350,43 @@ sealed class MainForm : Form
         return t.Length == 0 ? new[] { "query", "--limit", "50" } : new[] { "query", t, "--limit", "50" };
     }
 
+    string[] BuildContentQueryArgs()
+    {
+        string text = _search.Text.Trim();
+        return new[] { "query-content", text, "--limit", "50" };
+    }
+
+    async Task DoSearch()
+    {
+        string kind = _searchKind.SelectedItem?.ToString() ?? "Wiadomości";
+        if (kind != "Wiadomości" && string.IsNullOrWhiteSpace(_search.Text))
+        {
+            Log("Podaj frazę do wyszukania w zawartości załączników.");
+            return;
+        }
+
+        await RunCapture(() =>
+        {
+            if (kind is "Wiadomości" or "Wszystko")
+            {
+                if (kind == "Wszystko") Console.WriteLine("=== WIADOMOŚCI ===");
+                Query.Run(RamSession.Key!, BuildQueryArgs());
+            }
+            if (kind is "Załączniki" or "Wszystko")
+            {
+                if (kind == "Wszystko") Console.WriteLine("=== ZAŁĄCZNIKI I TRANSKRYPCJE ===");
+                ContentSearch.Run(RamSession.Key!, BuildContentQueryArgs());
+            }
+        }, "szukam...");
+    }
+
+    void OpenGmail()
+    {
+        if (RamSession.Key is null) { Log("Najpierw odblokuj."); return; }
+        using var form = new GmailManagerForm(() => RamSession.Key);
+        form.ShowDialog(this);
+    }
+
     async Task DoUnlock()
     {
         string pin = _pin.Text;
@@ -471,7 +512,8 @@ sealed class MainForm : Form
 
     void SetBusy(bool busy, string? msg = null)
     {
-        _init.Enabled = _unlock.Enabled = _lock.Enabled = _searchBtn.Enabled = _statsBtn.Enabled = _harvestBtn.Enabled = _range.Enabled = _ttl.Enabled = _rulesBtn.Enabled = !busy;
+        _init.Enabled = _unlock.Enabled = _lock.Enabled = _searchBtn.Enabled = _statsBtn.Enabled = _harvestBtn.Enabled
+            = _range.Enabled = _ttl.Enabled = _rulesBtn.Enabled = _gmailBtn.Enabled = _searchKind.Enabled = !busy;
         UseWaitCursor = busy;
         if (busy && msg != null) _status.Text = msg;
     }
@@ -519,6 +561,7 @@ sealed class MainForm : Form
             En(_lock, unlocked);
             En(_ttl, !unlocked);
             En(_searchBtn, unlocked); En(_statsBtn, unlocked); En(_harvestBtn, unlocked); En(_range, unlocked);
+            En(_gmailBtn, unlocked); En(_searchKind, unlocked);
         }
 
         _tray.Text = unlocked

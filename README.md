@@ -4,9 +4,9 @@ KKR MailLens tworzy lokalny, szyfrowany indeks poczty do wyszukiwania pełnoteks
 
 ## Stan projektu
 
-Aktualnie działa import Outlook/IMAP oraz pełna i przyrostowa synchronizacja Gmail API z CLI. Pipeline Gmail obejmuje trwałą kolejkę, pobieranie załączników, szyfrowany i deduplikowany magazyn blobów, ekstrakcję TXT/HTML/PDF/DOCX/XLSX/PPTX, lokalny OCR obrazów i mieszanych PDF-ów, transkrypcję audio/wideo przez FFmpeg i whisper.cpp oraz osobny indeks `content_fts`.
+Aktualnie działa import Outlook/IMAP oraz pełna i przyrostowa synchronizacja Gmail API z CLI i GUI. Pipeline Gmail obejmuje trwałą kolejkę, pobieranie załączników, szyfrowany i deduplikowany magazyn blobów, ekstrakcję TXT/HTML/PDF/DOCX/XLSX/PPTX, lokalny OCR obrazów i mieszanych PDF-ów, transkrypcję audio/wideo przez FFmpeg i whisper.cpp oraz osobny indeks `content_fts`.
 
-Nie są jeszcze dostępne: obsługa Gmaila i wyników załączników w GUI, pobieranie załączników Outlook/IMAP oraz wyszukiwanie semantyczne. Bieżący status ustaleń technicznych znajduje się w [indeksie audytów](docs/audits/README.md).
+Nie są jeszcze dostępne: pobieranie załączników Outlook/IMAP oraz wyszukiwanie semantyczne. Bieżący status ustaleń technicznych znajduje się w [indeksie audytów](docs/audits/README.md).
 
 ## Wymagania
 
@@ -54,7 +54,7 @@ run\KKR.MailLens.exe imap-harvest --account sender@example.invalid --since 2026-
 
 Integracja Gmail korzysta wyłącznie z oficjalnego Gmail API i zakresu `gmail.readonly`. Aplikacja otwiera logowanie w systemowej przeglądarce, nie przyjmuje hasła do Gmaila i nie uruchamia własnego serwera poza tymczasowym odbiornikiem OAuth na lokalnym adresie loopback.
 
-Zarządzanie kontami i synchronizacja Gmail są obecnie dostępne w CLI. Dedykowany panel Gmail w GUI pozostaje na roadmapie.
+Zarządzanie kontami i synchronizacja Gmail są dostępne w CLI oraz w panelu otwieranym przyciskiem `Gmail` w GUI. Panel pokazuje konta, postęp synchronizacji, stan kolejki i umożliwia uruchomienie Workera. Pole wyszukiwania GUI pozwala wybrać wiadomości, zawartość załączników i transkrypcji albo oba indeksy jednocześnie.
 
 Zakres `gmail.readonly` jest klasyfikowany jako restricted. Publicznie udostępniany klient OAuth może wymagać weryfikacji zgodnie z bieżącymi zasadami Google; repozytorium nie zawiera wspólnego identyfikatora ani sekretu klienta.
 

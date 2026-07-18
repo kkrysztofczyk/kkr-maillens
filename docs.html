@@ -35,7 +35,7 @@
 
   <section>
     <h2>Stan projektu</h2>
-    <p>Działa synchronizacja Gmail z CLI, kolejka Workera, szyfrowany magazyn załączników, ekstrakcja dokumentów, OCR obrazów i mieszanych PDF-ów, lokalna transkrypcja FFmpeg/whisper.cpp oraz osobny indeks FTS5 załączników. Panel Gmail w GUI, załączniki Outlook/IMAP, garbage collection blobów i wyszukiwanie semantyczne pozostają na roadmapie.</p>
+    <p>Działa synchronizacja Gmail z CLI i GUI, kolejka Workera, szyfrowany magazyn załączników, ekstrakcja dokumentów, OCR obrazów i mieszanych PDF-ów, lokalna transkrypcja FFmpeg/whisper.cpp, osobny indeks FTS5 załączników oraz garbage collection blobów. Załączniki Outlook/IMAP i wyszukiwanie semantyczne pozostają na roadmapie.</p>
   </section>
 
   <section>
@@ -69,6 +69,7 @@ run\KKR.MailLens.exe processing-run</pre>
 
   <section>
     <h2>Gmail i kolejka</h2>
+    <p>Przycisk <code>Gmail</code> w GUI otwiera panel kont, synchronizacji, postępu, kolejki i Workera. W głównym polu wyszukiwania można wybrać wiadomości, załączniki albo oba indeksy. Te same operacje są dostępne z CLI:</p>
     <pre>run\KKR.MailLens.exe account add gmail
 run\KKR.MailLens.exe gmail sync
 run\KKR.MailLens.exe processing-status
