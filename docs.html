@@ -34,6 +34,11 @@
   </section>
 
   <section>
+    <h2>Stan projektu</h2>
+    <p>Działa synchronizacja Gmail z CLI, kolejka Workera, szyfrowany magazyn załączników, ekstrakcja dokumentów, OCR obrazów i mieszanych PDF-ów oraz osobny indeks FTS5 załączników. Panel Gmail w GUI, załączniki Outlook/IMAP, transkrypcja audio/wideo, garbage collection blobów i wyszukiwanie semantyczne pozostają na roadmapie.</p>
+  </section>
+
+  <section>
     <h2>Szybki start</h2>
     <ol>
       <li>Uruchom <code>run\KKR.MailLens.Gui.exe</code>.</li>
@@ -71,6 +76,12 @@ run\KKR.MailLens.exe query-content "neutralny tekst"</pre>
     <pre>run\KKR.MailLens.exe config --tesseract "C:\Program Files\Tesseract-OCR\tesseract.exe" --ocr-languages pol+eng --ocr-pdf-dpi 300 --ocr-max-pdf-pages 100
 run\KKR.MailLens.exe rebuild-content-index</pre>
     <p>Worker renderuje przez PDFium tylko strony bez użytecznej warstwy tekstowej, wykonuje OCR strona po stronie i scala wynik według numeru strony przed aktualizacją indeksu FTS5.</p>
+  </section>
+
+  <section>
+    <h2>Model bezpieczeństwa i audyty</h2>
+    <p>SQLCipher i AES-GCM chronią dane w spoczynku. Projekt nie chroni przed złośliwym procesem działającym jako ten sam użytkownik Windows podczas odblokowanej sesji. Tokeny OAuth są obecnie chronione przez DPAPI <code>CurrentUser</code>; powiązanie ich z kluczem sesji pozostaje otwartym zadaniem.</p>
+    <p>Historyczne raporty oraz aktualny status ustaleń znajdują się w <a href="docs/audits/README.md"><code>docs/audits</code></a>.</p>
   </section>
 
   <section>

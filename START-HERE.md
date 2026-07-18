@@ -23,6 +23,8 @@ run\KKR.MailLens.exe imap-harvest --account sender@example.invalid --since 2026-
 
 Włącz Gmail API i utwórz klienta OAuth typu Desktop app. Plik konfiguracji zapisz poza repozytorium jako `%LOCALAPPDATA%\kkr-maillens\gmail-oauth-client.json` albo wskaż zmienną `KKR_MAILLENS_GMAIL_OAUTH_CONFIG`. Po odblokowaniu GUI:
 
+Obsługa kont i synchronizacja Gmail są obecnie wykonywane z CLI; panel Gmail w GUI nie jest jeszcze dostępny.
+
 ```powershell
 run\KKR.MailLens.exe account add gmail
 run\KKR.MailLens.exe gmail sync
@@ -54,6 +56,8 @@ run\KKR.MailLens.exe processing-run
 ```
 
 OCR przekazuje obrazy przez pamięć i strumienie procesu, bez jawnego pliku tymczasowego. Worker automatycznie renderuje przez PDFium tylko strony PDF bez użytecznej warstwy tekstowej, wykonuje OCR strona po stronie, scala wynik według numerów stron i aktualizuje indeks FTS5.
+
+Aktualny status funkcji oraz ustaleń bezpieczeństwa znajduje się w [indeksie audytów](docs/audits/README.md).
 
 ## Lokalizacja danych
 

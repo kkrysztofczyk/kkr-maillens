@@ -2,6 +2,12 @@
 
 KKR MailLens tworzy lokalny, szyfrowany indeks poczty do wyszukiwania pełnotekstowego i analityki. Dane są przechowywane w bazie SQLCipher, wyszukiwanie korzysta z FTS5, a klucz aktywnej sesji pozostaje w pamięci procesu GUI.
 
+## Stan projektu
+
+Aktualnie działa import Outlook/IMAP oraz pełna i przyrostowa synchronizacja Gmail API z CLI. Pipeline Gmail obejmuje trwałą kolejkę, pobieranie załączników, szyfrowany i deduplikowany magazyn blobów, ekstrakcję TXT/HTML/PDF/DOCX/XLSX/PPTX, lokalny OCR obrazów i mieszanych PDF-ów oraz osobny indeks `content_fts`.
+
+Nie są jeszcze dostępne: obsługa Gmaila i wyników załączników w GUI, pobieranie załączników Outlook/IMAP, transkrypcja audio/wideo, garbage collection osieroconych blobów oraz wyszukiwanie semantyczne. Bieżący status ustaleń technicznych znajduje się w [indeksie audytów](docs/audits/README.md).
+
 ## Wymagania
 
 - Windows
@@ -20,7 +26,7 @@ dotnet publish src\KKR.MailLens.Gui\KKR.MailLens.Gui.csproj -c Release -o run -p
 dotnet publish src\KKR.MailLens.Worker\KKR.MailLens.Worker.csproj -c Release -o run -p:DebugType=None -p:DebugSymbols=false
 ```
 
-Solution składa się z biblioteki `src\KKR.MailLens.Core`, aplikacji CLI `src\KKR.MailLens` oraz aplikacji WinForms `src\KKR.MailLens.Gui`. CLI i GUI korzystają z tego samego rdzenia przez `ProjectReference`; nie linkują ręcznie plików źródłowych. Assembly wykonywalne nazywają się odpowiednio `KKR.MailLens` i `KKR.MailLens.Gui`.
+Solution składa się z biblioteki `src\KKR.MailLens.Core`, aplikacji CLI `src\KKR.MailLens`, aplikacji WinForms `src\KKR.MailLens.Gui`, osobnego procesu `src\KKR.MailLens.Worker` oraz projektu testowego. CLI, GUI i Worker korzystają z tego samego rdzenia przez `ProjectReference`; nie linkują ręcznie plików źródłowych. Assembly wykonywalne nazywają się `KKR.MailLens`, `KKR.MailLens.Gui` i `KKR.MailLens.Worker`.
 
 ## Szybki start
 
@@ -46,6 +52,8 @@ run\KKR.MailLens.exe imap-harvest --account sender@example.invalid --since 2026-
 ## Gmail API i OAuth 2.0
 
 Integracja Gmail korzysta wyłącznie z oficjalnego Gmail API i zakresu `gmail.readonly`. Aplikacja otwiera logowanie w systemowej przeglądarce, nie przyjmuje hasła do Gmaila i nie uruchamia własnego serwera poza tymczasowym odbiornikiem OAuth na lokalnym adresie loopback.
+
+Zarządzanie kontami i synchronizacja Gmail są obecnie dostępne w CLI. Dedykowany panel Gmail w GUI pozostaje na roadmapie.
 
 Zakres `gmail.readonly` jest klasyfikowany jako restricted. Publicznie udostępniany klient OAuth może wymagać weryfikacji zgodnie z bieżącymi zasadami Google; repozytorium nie zawiera wspólnego identyfikatora ani sekretu klienta.
 
@@ -99,6 +107,10 @@ Domyślny katalog danych to `%LOCALAPPDATA%\kkr-maillens`. Lokalizację można z
 Baza pozostaje szyfrowana przez SQLCipher. Klucz jest wyprowadzany z PIN-u i opcjonalnego drugiego składnika, a następnie przechowywany wyłącznie w RAM działającego GUI. Import jest idempotentny, SQLite zachowuje dotychczasowy schemat danych, a wyszukiwanie nadal korzysta z FTS5.
 
 Refresh tokeny Gmaila są przechowywane poza bazą w plikach chronionych przez Windows DPAPI dla bieżącego użytkownika. Tokeny nie są wypisywane w logach. Pliki klienta OAuth są ignorowane przez Git i nie wolno ich commitować. Treść wiadomości pozostaje lokalna; aplikacja komunikuje się wyłącznie z wybranym źródłem poczty.
+
+Model chroni przede wszystkim dane w spoczynku, na przykład przy utracie wyłączonego komputera lub nośnika. Nie chroni przed złośliwym kodem uruchomionym jako ten sam użytkownik Windows podczas odblokowanej sesji: lokalny proces tego użytkownika może komunikować się z named pipe GUI, a DPAPI `CurrentUser` nie wymaga PIN-u KKR MailLens. Powiązanie tokenów i haseł źródeł z kluczem aktywnej sesji pozostaje otwartym zadaniem bezpieczeństwa.
+
+Historyczne raporty i aktualny status ich ustaleń są dostępne w [`docs/audits`](docs/audits/README.md).
 
 ## Polecenia
 

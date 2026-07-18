@@ -1,5 +1,8 @@
 # Code review — pipeline załączników Gmail
 
+> Raport historyczny dla zakresu `f4f6b02..01351b8`. Nie opisuje bieżącego stanu
+> `main`. Aktualny status ustaleń znajduje się w [indeksie audytów](README.md).
+
 **Data:** 2026-07-18
 **Zakres:** commity `f4f6b02..01351b8` (4 commity: model załączników, kolejka zadań, pobieranie załączników Gmail, zaszyfrowany magazyn blobów) + kontekst integracji.
 **Weryfikacja:** testy jednostkowe **31/31 przeszły** (binarka aktualna względem HEAD). Uwaga: `dotnet build` nie działa lokalnie — `global.json` wymaga SDK 9.0.316, zainstalowany jest 9.0.102 (patrz punkt 7).
