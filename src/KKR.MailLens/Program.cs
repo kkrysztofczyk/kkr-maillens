@@ -16,6 +16,8 @@ return cmd switch
     "harvest" => Cli.Harvest(args),
     "query" => Cli.Query(args),
     "query-content" => Cli.QueryContent(args),
+    "semantic-index" => Cli.SemanticIndex(args),
+    "query-semantic" => Cli.QuerySemantic(args),
     "rebuild-content-index" => Cli.RebuildContentIndex(),
     "stats" => Cli.Stats(),
     "reclassify" => Cli.Reclassify(),

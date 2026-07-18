@@ -75,6 +75,34 @@ static class Cli
         { cfg.WhisperTimeoutSeconds = Math.Clamp(whisperSeconds, 30, 24 * 3600); changed = true; }
         if (GetStr(args, "--transcription-max-minutes") is { } duration && int.TryParse(duration, out int minutes))
         { cfg.TranscriptionMaxMinutes = Math.Clamp(minutes, 1, 24 * 60); changed = true; }
+        if (GetStr(args, "--semantic-enabled") is { } semantic && bool.TryParse(semantic, out bool enabled))
+        { cfg.SemanticEnabled = enabled; changed = true; }
+        if (GetStr(args, "--embedding-endpoint") is { } endpoint)
+        { cfg.EmbeddingEndpoint = endpoint.Trim(); changed = true; }
+        if (GetStr(args, "--embedding-model") is { } embeddingModel)
+        { cfg.EmbeddingModel = embeddingModel.Trim(); changed = true; }
+        if (GetStr(args, "--embedding-batch-size") is { } embeddingBatch
+            && int.TryParse(embeddingBatch, out int embeddingBatchSize))
+        { cfg.EmbeddingBatchSize = Math.Clamp(embeddingBatchSize, 1, 64); changed = true; }
+        if (GetStr(args, "--embedding-timeout") is { } embeddingTimeout
+            && int.TryParse(embeddingTimeout, out int embeddingTimeoutSeconds))
+        { cfg.EmbeddingTimeoutSeconds = Math.Clamp(embeddingTimeoutSeconds, 10, 3600); changed = true; }
+        if (GetStr(args, "--semantic-max-candidates") is { } candidates
+            && int.TryParse(candidates, out int maxCandidates))
+        { cfg.SemanticMaxCandidates = Math.Clamp(maxCandidates, 100, 250_000); changed = true; }
+        if (cfg.SemanticEnabled)
+        {
+            try
+            {
+                _ = new OllamaEmbeddingOptions(cfg.EmbeddingEndpoint, cfg.EmbeddingModel,
+                    TimeSpan.FromSeconds(Math.Clamp(cfg.EmbeddingTimeoutSeconds, 10, 3600))).Validate();
+            }
+            catch (Exception ex) when (ex is ArgumentException or ArgumentOutOfRangeException)
+            {
+                Console.Error.WriteLine(ex.Message);
+                return 1;
+            }
+        }
         if (changed) { cfg.Save(); Console.WriteLine($"Zapisano config: {Paths.ConfigFile}"); }
 
         Console.WriteLine($"Katalog danych: {Paths.Base}");
@@ -87,7 +115,8 @@ static class Cli
         Console.WriteLine($"FFmpeg       : {cfg.FfmpegPath}, timeout {cfg.FfmpegTimeoutSeconds} s");
         Console.WriteLine($"whisper.cpp  : {cfg.WhisperPath}, model '{cfg.WhisperModelPath}', język {cfg.WhisperLanguage}, timeout {cfg.WhisperTimeoutSeconds} s");
         Console.WriteLine($"Transkrypcja : max {cfg.TranscriptionMaxMinutes} min");
-        if (!changed) Console.WriteLine("Zmiana: config [--store <fragment>] [--max N] [--tesseract <sciezka>] [--ocr-languages pol+eng] [--ocr-timeout N] [--ocr-pdf-dpi N] [--ocr-max-pdf-pages N] [--ocr-pdf-render-timeout N] [--ocr-pdf-batch-size N] [--worker-memory-mb N] [--ffmpeg <sciezka>] [--whisper <sciezka>] [--whisper-model <plik>] [--whisper-language auto] [--ffmpeg-timeout N] [--whisper-timeout N] [--transcription-max-minutes N]");
+        Console.WriteLine($"Semantyczne  : {(cfg.SemanticEnabled ? "włączone" : "wyłączone")}, model {cfg.EmbeddingModel}, endpoint {cfg.EmbeddingEndpoint}, batch {cfg.EmbeddingBatchSize}, kandydaci {cfg.SemanticMaxCandidates}");
+        if (!changed) Console.WriteLine("Zmiana: config [--store <fragment>] [--max N] [--tesseract <sciezka>] [--ocr-languages pol+eng] [--ocr-timeout N] [--ocr-pdf-dpi N] [--ocr-max-pdf-pages N] [--ocr-pdf-render-timeout N] [--ocr-pdf-batch-size N] [--worker-memory-mb N] [--ffmpeg <sciezka>] [--whisper <sciezka>] [--whisper-model <plik>] [--whisper-language auto] [--ffmpeg-timeout N] [--whisper-timeout N] [--transcription-max-minutes N] [--semantic-enabled true|false] [--embedding-endpoint URL] [--embedding-model NAME] [--embedding-batch-size N] [--embedding-timeout N] [--semantic-max-candidates N]");
         return 0;
     }
 
@@ -446,6 +475,67 @@ static class Cli
         return 0;
     }
 
+    public static int SemanticIndex(string[] args)
+    {
+        string? key = RequireKey(); if (key is null) return 2;
+        AppConfig config = AppConfig.Load();
+        if (!config.SemanticEnabled)
+        {
+            Console.Error.WriteLine("Wyszukiwanie semantyczne jest wyłączone. Użyj config --semantic-enabled true.");
+            return 1;
+        }
+        return RunCancelable(async cancellationToken =>
+        {
+            using var connection = Db.Open(key, create: false);
+            Db.EnsureSchema(connection);
+            using IEmbeddingProvider provider = SemanticServices.CreateProvider(config);
+            SemanticIndexResult result = await KKR.MailLens.SemanticIndex.IndexAsync(connection, provider,
+                Math.Clamp(config.EmbeddingBatchSize, 1, 64), rebuild: Flag(args, "--rebuild"),
+                cancellationToken: cancellationToken,
+                heartbeat: () => Console.Write(".")).ConfigureAwait(false);
+            Console.WriteLine();
+            Console.WriteLine($"Embeddingi: +{result.Indexed}, łącznie {result.TotalForModel}, model {provider.Model}.");
+            return 0;
+        });
+    }
+
+    public static int QuerySemantic(string[] args)
+    {
+        string? key = RequireKey(); if (key is null) return 2;
+        string query = QueryText(args);
+        if (query.Length == 0) { Console.Error.WriteLine("Podaj szukaną frazę."); return 1; }
+        AppConfig config = AppConfig.Load();
+        if (!config.SemanticEnabled)
+        {
+            Console.Error.WriteLine("Wyszukiwanie semantyczne jest wyłączone. Użyj config --semantic-enabled true.");
+            return 1;
+        }
+        return RunCancelable(async cancellationToken =>
+        {
+            using var connection = Db.Open(key, create: false);
+            Db.EnsureSchema(connection);
+            using IEmbeddingProvider provider = SemanticServices.CreateProvider(config);
+            SemanticQueryResult result = await KKR.MailLens.SemanticSearch.SearchAsync(connection, provider,
+                query, GetInt(args, "--limit", 25), hybrid: !Flag(args, "--semantic-only"),
+                Math.Clamp(config.SemanticMaxCandidates, 100, 250_000), cancellationToken).ConfigureAwait(false);
+            foreach (SemanticSearchHit item in result.Hits)
+            {
+                ContentSearchHit hit = item.Hit;
+                string similarity = item.Similarity is null ? "" : $", podobieństwo {item.Similarity.Value:0.000}";
+                Console.WriteLine($"{hit.Received}  {hit.Sender}  [{item.Channels}{similarity}]");
+                Console.WriteLine($"    {hit.Subject}");
+                Console.WriteLine($"    {SemanticLocation(hit)}{hit.Filename}");
+                if (hit.Snippet.Length > 0) Console.WriteLine($"    | {hit.Snippet}");
+            }
+            if (result.CandidateLimitReached)
+                Console.WriteLine($"UWAGA: ranking semantyczny ograniczono do {config.SemanticMaxCandidates} najnowszych segmentów.");
+            Console.WriteLine(result.Hits.Count == 0
+                ? $"(brak trafień; embeddingi modelu: {result.IndexedVectors})"
+                : $"-- {result.Hits.Count} trafień; embeddingi modelu: {result.IndexedVectors}");
+            return 0;
+        });
+    }
+
     public static int BlobGc(string[] args)
     {
         string? key = RequireKey(); if (key is null) return 2;
@@ -516,6 +606,9 @@ static class Cli
         GmailAuthorizationException => exception.Message,
         FileNotFoundException => exception.Message,
         InvalidOperationException => exception.Message,
+        InvalidDataException => exception.Message,
+        ArgumentException => exception.Message,
+        HttpRequestException => exception.Message,
         _ => exception.GetType().Name,
     };
 
@@ -567,6 +660,8 @@ static class Cli
                      [--ffmpeg <sciezka>] [--whisper <sciezka>] [--whisper-model <plik>]
                      [--whisper-language auto] [--ffmpeg-timeout N] [--whisper-timeout N]
                      [--transcription-max-minutes N]
+                     [--semantic-enabled true|false] [--embedding-endpoint URL] [--embedding-model NAME]
+                     [--embedding-batch-size N] [--embedding-timeout N] [--semantic-max-candidates N]
                                                    konfiguracja importu i lokalnego OCR
               harvest [--store <fragm>] [--since yyyy-MM-dd] [--max <N>] [--folders "A,B,C"]
                                                    zbierz foldery do korpusu (store/limit domyslnie z config.json;
@@ -575,6 +670,9 @@ static class Cli
                                                    szukaj (FTS + filtry); domyslnie POMIJA alerty; --all=z alertami, --alerts=tylko alerty
               query-content <tekst> [--limit N] [--raw]
                                                    szukaj w segmentach zalacznikow z kontekstem strony/slajdu/arkusza
+              semantic-index [--rebuild]           uzupelnij lokalne embeddingi segmentow
+              query-semantic <tekst> [--limit N] [--semantic-only]
+                                                   szukaj hybrydowo FTS5 + lokalne embeddingi
               rebuild-content-index                odbuduj indeks segmentow z content_segments
               stats                                statystyki korpusu (liczby, korespondencja vs alerty, top nadawcy)
               reclassify                           przelicz kind (mail|alert) wg noise-rules.json dla calego korpusu
@@ -636,6 +734,33 @@ static class Cli
     static bool Flag(string[] args, string name) => Args.Flag(args, name);
     static string? GetStr(string[] args, string name) => Args.Str(args, name);
     static int GetInt(string[] args, string name, int fallback) => Args.Int(args, name, fallback);
+
+    static string QueryText(string[] args)
+    {
+        for (int index = 1; index < args.Length; index++)
+        {
+            if (args[index] is "--semantic-only" or "--rebuild") continue;
+            if (args[index] == "--limit") { index++; continue; }
+            if (!args[index].StartsWith("--", StringComparison.Ordinal)) return args[index];
+        }
+        return "";
+    }
+
+    static string SemanticLocation(ContentSearchHit hit)
+    {
+        if (hit.PageNumber is not null) return $"strona {hit.PageNumber}: ";
+        if (hit.SlideNumber is not null) return $"slajd {hit.SlideNumber}: ";
+        if (!string.IsNullOrWhiteSpace(hit.SheetName)) return $"arkusz {hit.SheetName}: ";
+        if (hit.StartMs is not null)
+            return $"{SemanticTimestamp(hit.StartMs.Value)}–{SemanticTimestamp(hit.EndMs ?? hit.StartMs.Value)}: ";
+        return "";
+    }
+
+    static string SemanticTimestamp(long milliseconds)
+    {
+        long seconds = Math.Max(0, milliseconds) / 1000;
+        return $"{seconds / 3600:00}:{seconds / 60 % 60:00}:{seconds % 60:00}";
+    }
 
     static string FormatBytes(long bytes)
     {

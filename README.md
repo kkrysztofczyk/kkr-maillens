@@ -6,7 +6,7 @@ KKR MailLens tworzy lokalny, szyfrowany indeks poczty do wyszukiwania pełnoteks
 
 Aktualnie działa import Outlook/IMAP oraz pełna i przyrostowa synchronizacja Gmail API z CLI i GUI. Pipeline Gmail obejmuje trwałą kolejkę, pobieranie załączników, szyfrowany i deduplikowany magazyn blobów, ekstrakcję TXT/HTML/PDF/DOCX/XLSX/PPTX, lokalny OCR obrazów i mieszanych PDF-ów, transkrypcję audio/wideo przez FFmpeg i whisper.cpp oraz osobny indeks `content_fts`.
 
-Nie jest jeszcze dostępne wyszukiwanie semantyczne; dokładne wyszukiwanie FTS5 pozostaje podstawą projektu. Bieżący status ustaleń technicznych znajduje się w [indeksie audytów](docs/audits/README.md).
+Dostępne jest opcjonalne wyszukiwanie semantyczne i hybrydowe przez lokalny endpoint. Dokładne wyszukiwanie FTS5 pozostaje podstawą projektu i nie jest zastępowane przez model. Bieżący status ustaleń technicznych znajduje się w [indeksie audytów](docs/audits/README.md).
 
 ## Wymagania
 
@@ -16,6 +16,7 @@ Nie jest jeszcze dostępne wyszukiwanie semantyczne; dokładne wyszukiwanie FTS5
 - opcjonalny sprzętowy drugi składnik uwierzytelnienia
 - opcjonalnie Tesseract 5 z danymi językowymi `pol` i `eng` do lokalnego OCR obrazów i skanowanych PDF-ów
 - opcjonalnie FFmpeg, `whisper-cli` z projektu whisper.cpp i lokalny model `ggml-small.bin` do transkrypcji audio/wideo
+- opcjonalnie lokalny Ollama i model embeddingów do wyszukiwania semantycznego; aplikacja akceptuje wyłącznie endpoint loopback
 
 ## Build
 
@@ -56,7 +57,7 @@ run\KKR.MailLens.exe query-content "neutralny tekst"
 
 Integracja Gmail korzysta wyłącznie z oficjalnego Gmail API i zakresu `gmail.readonly`. Aplikacja otwiera logowanie w systemowej przeglądarce, nie przyjmuje hasła do Gmaila i nie uruchamia własnego serwera poza tymczasowym odbiornikiem OAuth na lokalnym adresie loopback.
 
-Zarządzanie kontami i synchronizacja Gmail są dostępne w CLI oraz w panelu otwieranym przyciskiem `Gmail` w GUI. Panel pokazuje konta, postęp synchronizacji, stan kolejki i umożliwia uruchomienie Workera. Pole wyszukiwania GUI pozwala wybrać wiadomości, zawartość załączników i transkrypcji albo oba indeksy jednocześnie.
+Zarządzanie kontami i synchronizacja Gmail są dostępne w CLI oraz w panelu otwieranym przyciskiem `Gmail` w GUI. Panel pokazuje konta, postęp synchronizacji, stan kolejki i umożliwia uruchomienie Workera. Pole wyszukiwania GUI pozwala wybrać wiadomości, zawartość załączników i transkrypcji, oba indeksy dokładne albo opcjonalny ranking hybrydowy.
 
 Zakres `gmail.readonly` jest klasyfikowany jako restricted. Publicznie udostępniany klient OAuth może wymagać weryfikacji zgodnie z bieżącymi zasadami Google; repozytorium nie zawiera wspólnego identyfikatora ani sekretu klienta.
 
@@ -113,6 +114,21 @@ run\KKR.MailLens.exe query-content "neutralny tekst"
 
 Transkrypcja jest całkowicie lokalna, bez diarization i usług sieciowych. Limit pobieranego załącznika Gmail pozostaje bez zmian; domyślnie analizowane jest maksymalnie 120 minut jednego pliku.
 
+## Lokalne embeddingi i wyszukiwanie hybrydowe
+
+Wyszukiwanie semantyczne jest domyślnie wyłączone. Korzysta z lokalnego endpointu Ollama `/api/embed`; kod odrzuca adresy inne niż `localhost`, `127.0.0.1` lub inny adres IP loopback i wyłącza systemowy proxy dla tego połączenia. Należy wybrać model zainstalowany lokalnie, a nie model chmurowy udostępniany przez lokalny runtime. Wektory są przechowywane w bazie SQLCipher, powiązane z segmentami kluczem obcym i automatycznie usuwane razem z nimi. Tekst źródłowy, wynik OCR i transkrypcja nie są przez model poprawiane ani zastępowane.
+
+Po lokalnym zainstalowaniu Ollama i pobraniu modelu embeddingów:
+
+```powershell
+ollama pull embeddinggemma
+run\KKR.MailLens.exe config --semantic-enabled true --embedding-endpoint http://127.0.0.1:11434 --embedding-model embeddinggemma --embedding-batch-size 16 --semantic-max-candidates 25000
+run\KKR.MailLens.exe semantic-index
+run\KKR.MailLens.exe query-semantic "neutralny tekst"
+```
+
+`semantic-index --rebuild` odtwarza embeddingi wybranego modelu, a `query-semantic --semantic-only` pomija FTS5. Domyślne wyszukiwanie hybrydowe łączy ranking FTS5 i podobieństwo cosinusowe przez Reciprocal Rank Fusion, z większą wagą kanału dokładnego. Po włączeniu funkcji Worker automatycznie kolejkuje zadanie `embed` po zakończonej ekstrakcji, OCR lub transkrypcji. GUI udostępnia osobny zakres `Hybrydowe`.
+
 ## Konserwacja magazynu blobów
 
 Zaszyfrowany blob może być współdzielony przez wiele wiadomości. Garbage collection usuwa plik dopiero po zniknięciu ostatniej aktywnej referencji i pomija dane używane przez działające zadanie Workera. Najpierw można wykonać bezpieczny podgląd:
@@ -152,4 +168,4 @@ Pełną listę poleceń pokazuje:
 run\KKR.MailLens.exe help
 ```
 
-Najważniejsze operacje to `init`, `status`, `lock`, `config`, `harvest`, `account`, `gmail`, `processing-run`, `processing-status`, `processing-retry`, `blob-gc`, `query`, `query-content`, `rebuild-content-index`, `stats`, `analyze`, `analyze-rules`, `reclassify` i `selftest`.
+Najważniejsze operacje to `init`, `status`, `lock`, `config`, `harvest`, `account`, `gmail`, `processing-run`, `processing-status`, `processing-retry`, `blob-gc`, `query`, `query-content`, `semantic-index`, `query-semantic`, `rebuild-content-index`, `stats`, `analyze`, `analyze-rules`, `reclassify` i `selftest`.

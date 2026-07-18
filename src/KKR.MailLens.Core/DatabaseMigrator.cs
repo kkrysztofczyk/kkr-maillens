@@ -15,9 +15,10 @@ static class DatabaseMigrator
         new Migration006StoredBlobs(),
         new Migration007ContentDocuments(),
         new Migration008ContentSearch(),
+        new Migration009SemanticSearch(),
     ];
 
-    public const int LatestVersion = 8;
+    public const int LatestVersion = 9;
 
     public static void Migrate(SqliteConnection connection)
     {

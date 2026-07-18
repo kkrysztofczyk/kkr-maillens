@@ -28,6 +28,12 @@ sealed class AppConfig
     public int FfmpegTimeoutSeconds { get; set; } = 600;
     public int WhisperTimeoutSeconds { get; set; } = 3600;
     public int TranscriptionMaxMinutes { get; set; } = 120;
+    public bool SemanticEnabled { get; set; }
+    public string EmbeddingEndpoint { get; set; } = "http://127.0.0.1:11434";
+    public string EmbeddingModel { get; set; } = "embeddinggemma";
+    public int EmbeddingBatchSize { get; set; } = 16;
+    public int EmbeddingTimeoutSeconds { get; set; } = 300;
+    public int SemanticMaxCandidates { get; set; } = 25_000;
 
     /// <summary>Efektywny cap dla skanera (&lt;=0 traktujemy jako "bez limitu"). Nie serializowane.</summary>
     [JsonIgnore]

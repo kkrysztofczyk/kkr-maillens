@@ -46,8 +46,6 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Wyszukiwanie GUI przełącza się między wiadomościami, `content_fts` albo łączy oba rodzaje wyników.
 - IMAP zapisuje locator konto/folder/UIDVALIDITY/UID/część MIME, a Worker pobiera i przetwarza załącznik przez MailKit z limitem pamięci.
 - Outlook zapisuje StoreID/EntryID/indeks załącznika; broker COM działa na dedykowanym STA i sprząta izolowany plaintext workspace.
-- Zestaw testów wzrósł z historycznych 20/31 do 85 testów.
-
-### Otwarte — roadmapa
-
-- Opcjonalne lokalne AI i wyszukiwanie semantyczne.
+- Opcjonalne lokalne embeddingi są zapisywane w SQLCipher, automatycznie kolejkują się po przetworzeniu dokumentu i zasilają osobny ranking semantyczny lub hybrydowy FTS5 + RRF.
+- Endpoint embeddingów jest ograniczony do loopback i nie używa systemowego proxy; tekst OCR i transkrypcji nie jest modyfikowany przez model.
+- Zestaw testów wzrósł z historycznych 20/31 do 90 testów.

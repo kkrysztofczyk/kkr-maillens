@@ -8,7 +8,7 @@ KKR MailLens to lokalny, szyfrowany indeks poczty z wyszukiwaniem FTS5. Klucz ak
 2. Wpisz PIN, opcjonalnie włącz drugi składnik i kliknij `Inicjuj`.
 3. Kliknij `Odblokuj`.
 4. Kliknij `Harvest`, aby pobrać pocztę ze źródła desktopowego.
-5. Użyj pola `Szukaj` i wybierz zakres `Wiadomości`, `Załączniki` albo `Wszystko`; alerty automatyczne są domyślnie odsiewane według lokalnych reguł.
+5. Użyj pola `Szukaj` i wybierz zakres `Wiadomości`, `Załączniki`, opcjonalne `Hybrydowe` albo `Wszystko`; alerty automatyczne są domyślnie odsiewane według lokalnych reguł.
 
 `Harvest` zapisuje także metadane załączników Outlook. Uruchom `run\KKR.MailLens.exe processing-run`, aby Worker pobrał je przez dedykowany wątek STA, zaszyfrował i zindeksował. Jawny plik wymagany przez API Outlooka jest usuwany z izolowanego katalogu roboczego przed zakończeniem zadania.
 
@@ -74,6 +74,19 @@ run\KKR.MailLens.exe processing-run
 ```
 
 Audio z nagrań i filmów jest lokalnie konwertowane do mono PCM 16 kHz. Segmenty transkrypcji zachowują zakres czasu i są dostępne przez `query-content`. Pliki robocze WAV/JSON są usuwane po zadaniu i nie trafiają do repozytorium.
+
+## Lokalne wyszukiwanie semantyczne
+
+Funkcja jest opcjonalna i domyślnie wyłączona. Po lokalnym zainstalowaniu Ollama:
+
+```powershell
+ollama pull embeddinggemma
+run\KKR.MailLens.exe config --semantic-enabled true --embedding-endpoint http://127.0.0.1:11434 --embedding-model embeddinggemma
+run\KKR.MailLens.exe semantic-index
+run\KKR.MailLens.exe query-semantic "neutralny tekst"
+```
+
+Endpoint musi wskazywać adres loopback, embeddingi pozostają w SQLCipher, a FTS5 nadal odpowiada za dokładne frazy i identyfikatory. Nowe dokumenty otrzymują embeddingi przez zadania Workera; istniejące można uzupełnić poleceniem `semantic-index`.
 
 Aktualny status funkcji oraz ustaleń bezpieczeństwa znajduje się w [indeksie audytów](docs/audits/README.md).
 

@@ -20,7 +20,7 @@ sealed class MainForm : Form
     readonly Button _unlock = Btn("Odblokuj");
     readonly Button _lock = Btn("Zablokuj");
     readonly TextBox _search = new() { Width = 200, Margin = new Padding(0, 6, 4, 0) };
-    readonly ComboBox _searchKind = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 105, Margin = new Padding(4, 6, 0, 0) };
+    readonly ComboBox _searchKind = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 115, Margin = new Padding(4, 6, 0, 0) };
     readonly Button _searchBtn = Btn("Szukaj");
     readonly Button _statsBtn = Btn("Statystyki");
     readonly ComboBox _range = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 90, Margin = new Padding(4, 6, 4, 0) };
@@ -82,7 +82,7 @@ sealed class MainForm : Form
         _range.Anchor = AnchorStyles.Left | AnchorStyles.Right; _range.Margin = new Padding(0, 6, 0, 0);
         _ttl.Items.AddRange(new object[] { "5h", "12h", "24h" }); _ttl.SelectedIndex = 0;
         _range.Items.AddRange(new object[] { "3 dni", "Dzis", "Od ostatniego", "7 dni", "30 dni", "Ten rok", "Wszystko" }); _range.SelectedIndex = 0; // domyslnie 3 dni (zachodzi na siebie - brak dziur)
-        _searchKind.Items.AddRange(new object[] { "Wiadomości", "Załączniki", "Wszystko" }); _searchKind.SelectedIndex = 0;
+        _searchKind.Items.AddRange(new object[] { "Wiadomości", "Załączniki", "Hybrydowe", "Wszystko" }); _searchKind.SelectedIndex = 0;
 
         // srodek (col2): YubiKey w gorze, Szukaj+Statystyki w dole; reszta col2 to luz (Percent)
         var unlockMid = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0) };
@@ -377,7 +377,50 @@ sealed class MainForm : Form
                 if (kind == "Wszystko") Console.WriteLine("=== ZAŁĄCZNIKI I TRANSKRYPCJE ===");
                 ContentSearch.Run(RamSession.Key!, BuildContentQueryArgs());
             }
+            if (kind == "Hybrydowe") RunSemanticSearch();
         }, "szukam...");
+    }
+
+    void RunSemanticSearch()
+    {
+        AppConfig config = AppConfig.Load();
+        if (!config.SemanticEnabled)
+        {
+            Console.Error.WriteLine("Wyszukiwanie semantyczne jest wyłączone. Włącz je poleceniem config --semantic-enabled true.");
+            return;
+        }
+        using var connection = Db.Open(RamSession.Key!, create: false);
+        Db.EnsureSchema(connection);
+        using IEmbeddingProvider provider = SemanticServices.CreateProvider(config);
+        SemanticQueryResult result = SemanticSearch.SearchAsync(connection, provider, _search.Text.Trim(), 50,
+            hybrid: true, Math.Clamp(config.SemanticMaxCandidates, 100, 250_000)).GetAwaiter().GetResult();
+        foreach (SemanticSearchHit item in result.Hits)
+        {
+            ContentSearchHit hit = item.Hit;
+            string similarity = item.Similarity is null ? "" : $", podobieństwo {item.Similarity.Value:0.000}";
+            Console.WriteLine($"{hit.Received}  {hit.Sender}  [{item.Channels}{similarity}]");
+            Console.WriteLine($"    {hit.Subject}");
+            Console.WriteLine($"    {SearchLocation(hit)}{hit.Filename}");
+            if (hit.Snippet.Length > 0) Console.WriteLine($"    | {hit.Snippet}");
+        }
+        if (result.CandidateLimitReached)
+            Console.WriteLine($"UWAGA: ranking ograniczono do {config.SemanticMaxCandidates} najnowszych segmentów.");
+        Console.WriteLine(result.Hits.Count == 0 ? "(brak trafień)" : $"-- {result.Hits.Count} trafień");
+    }
+
+    static string SearchLocation(ContentSearchHit hit)
+    {
+        if (hit.PageNumber is not null) return $"strona {hit.PageNumber}: ";
+        if (hit.SlideNumber is not null) return $"slajd {hit.SlideNumber}: ";
+        if (!string.IsNullOrWhiteSpace(hit.SheetName)) return $"arkusz {hit.SheetName}: ";
+        if (hit.StartMs is not null) return $"{Timestamp(hit.StartMs.Value)}–{Timestamp(hit.EndMs ?? hit.StartMs.Value)}: ";
+        return "";
+    }
+
+    static string Timestamp(long milliseconds)
+    {
+        long seconds = Math.Max(0, milliseconds) / 1000;
+        return $"{seconds / 3600:00}:{seconds / 60 % 60:00}:{seconds % 60:00}";
     }
 
     void OpenGmail()

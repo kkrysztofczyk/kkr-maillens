@@ -35,7 +35,16 @@
 
   <section>
     <h2>Stan projektu</h2>
-    <p>Działa synchronizacja Gmail z CLI i GUI, kolejka Workera, szyfrowany magazyn załączników Gmail/IMAP/Outlook, ekstrakcja dokumentów, OCR obrazów i mieszanych PDF-ów, lokalna transkrypcja FFmpeg/whisper.cpp, osobny indeks FTS5 załączników oraz garbage collection blobów. Wyszukiwanie semantyczne pozostaje na roadmapie.</p>
+    <p>Działa synchronizacja Gmail z CLI i GUI, kolejka Workera, szyfrowany magazyn załączników Gmail/IMAP/Outlook, ekstrakcja dokumentów, OCR obrazów i mieszanych PDF-ów, lokalna transkrypcja FFmpeg/whisper.cpp, osobny indeks FTS5 załączników, opcjonalne lokalne wyszukiwanie hybrydowe oraz garbage collection blobów.</p>
+  </section>
+
+  <section>
+    <h2>Lokalne embeddingi</h2>
+    <p>Opcjonalny kanał semantyczny korzysta wyłącznie z endpointu Ollama na adresie loopback. Embeddingi są przechowywane w SQLCipher, a tekst OCR i transkrypcji nie jest przez model zmieniany. Domyślny ranking hybrydowy łączy FTS5 z podobieństwem cosinusowym, zachowując większą wagę dokładnego wyszukiwania.</p>
+    <pre>ollama pull embeddinggemma
+run\KKR.MailLens.exe config --semantic-enabled true --embedding-endpoint http://127.0.0.1:11434 --embedding-model embeddinggemma
+run\KKR.MailLens.exe semantic-index
+run\KKR.MailLens.exe query-semantic "neutralny tekst"</pre>
   </section>
 
   <section>
@@ -69,7 +78,7 @@ run\KKR.MailLens.exe processing-run</pre>
 
   <section>
     <h2>Gmail i kolejka</h2>
-    <p>Przycisk <code>Gmail</code> w GUI otwiera panel kont, synchronizacji, postępu, kolejki i Workera. W głównym polu wyszukiwania można wybrać wiadomości, załączniki albo oba indeksy. Te same operacje są dostępne z CLI:</p>
+    <p>Przycisk <code>Gmail</code> w GUI otwiera panel kont, synchronizacji, postępu, kolejki i Workera. W głównym polu wyszukiwania można wybrać wiadomości, załączniki, oba indeksy dokładne albo opcjonalny ranking hybrydowy. Te same operacje są dostępne z CLI:</p>
     <pre>run\KKR.MailLens.exe account add gmail
 run\KKR.MailLens.exe gmail sync
 run\KKR.MailLens.exe processing-status

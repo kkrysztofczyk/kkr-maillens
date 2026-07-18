@@ -1,4 +1,5 @@
 using KKR.MailLens;
+using Microsoft.Data.Sqlite;
 
 SQLitePCL.Batteries_V2.Init();
 
@@ -57,6 +58,8 @@ try
                         ProcessingJobRepository.Enqueue(connection, "ocr", job.AttachmentId.Value, job.DocumentId.Value);
                     else if (outcome.Status == "needs-transcription" && MediaTypes.IsMedia(outcome.DetectedMimeType))
                         ProcessingJobRepository.Enqueue(connection, "transcribe", job.AttachmentId.Value, job.DocumentId.Value);
+                    else if (outcome.Status == "completed")
+                        EnqueueSemanticIfEnabled(connection, job.AttachmentId.Value, job.DocumentId.Value);
                     break;
                 case "ocr":
                     if (job.AttachmentId is null || job.DocumentId is null)
@@ -82,6 +85,7 @@ try
                             if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, ocrLeaseDuration))
                                 throw new InvalidOperationException("Worker utracił lease zadania OCR.");
                     });
+                    EnqueueSemanticIfEnabled(connection, job.AttachmentId.Value, job.DocumentId.Value);
                     break;
                 case "transcribe":
                     if (job.AttachmentId is null || job.DocumentId is null)
@@ -106,6 +110,29 @@ try
                             if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, transcriptionLeaseDuration))
                                 throw new InvalidOperationException("Worker utracił lease zadania transkrypcji.");
                         });
+                    EnqueueSemanticIfEnabled(connection, job.AttachmentId.Value, job.DocumentId.Value);
+                    break;
+                case "embed":
+                    if (job.DocumentId is null)
+                        throw new InvalidDataException("Zadanie embeddingu nie wskazuje dokumentu.");
+                    AppConfig semanticConfig = AppConfig.Load();
+                    if (!semanticConfig.SemanticEnabled) break;
+                    TimeSpan semanticLease = TimeSpan.FromSeconds(
+                        Math.Clamp(semanticConfig.EmbeddingTimeoutSeconds, 10, 3600) + 60);
+                    if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, semanticLease))
+                        throw new InvalidOperationException("Worker utracił lease zadania embeddingu.");
+                    using (IEmbeddingProvider provider = SemanticServices.CreateProvider(semanticConfig))
+                    {
+                        await SemanticIndex.IndexAsync(connection, provider,
+                            Math.Clamp(semanticConfig.EmbeddingBatchSize, 1, 64), job.DocumentId.Value,
+                            cancellationToken: shutdown.Token,
+                            heartbeat: () =>
+                            {
+                                shutdown.Token.ThrowIfCancellationRequested();
+                                if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, semanticLease))
+                                    throw new InvalidOperationException("Worker utracił lease zadania embeddingu.");
+                            });
+                    }
                     break;
                 default:
                     throw new NotSupportedException($"Nieobsługiwany typ zadania: {job.JobType}");
@@ -230,6 +257,12 @@ static async Task MonitorSessionAsync(CancellationTokenSource shutdown, Action o
         }
     }
     catch (OperationCanceledException) when (shutdown.IsCancellationRequested) { }
+}
+
+static void EnqueueSemanticIfEnabled(SqliteConnection connection, long attachmentId, long documentId)
+{
+    if (AppConfig.Load().SemanticEnabled)
+        ProcessingJobRepository.Enqueue(connection, "embed", attachmentId, documentId, priority: 200);
 }
 
 static long ParseGmailAccountId(string entryId)
