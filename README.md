@@ -158,6 +158,8 @@ Refresh tokeny Gmaila i hasła IMAP są szyfrowane AES-GCM kluczem wyprowadzonym
 
 Model chroni przede wszystkim dane w spoczynku, na przykład przy utracie wyłączonego komputera lub nośnika. Nie chroni przed złośliwym kodem uruchomionym jako ten sam użytkownik Windows podczas odblokowanej sesji: lokalny proces tego użytkownika może komunikować się z named pipe GUI i uzyskać dostęp do operacji wykonywanych przez odblokowaną aplikację. Ponowna inicjalizacja z `force` usuwa tokeny, hasła źródeł i bloby związane z poprzednim kluczem korpusu.
 
+Tryb bez klucza sprzętowego przyjmuje wybrany przez użytkownika niepusty PIN; aplikacja nie udaje, że krótki PIN ma wysoką entropię. Dla publicznego lub wrażliwego korpusu należy użyć długiej frazy albo trybu `PIN + YubiKey`. Challenge YubiKey jest losową solą konkretnego korpusu; fizyczny dotyk jest wymagany tylko wtedy, gdy tak skonfigurowano slot urządzenia.
+
 Historyczne raporty i aktualny status ich ustaleń są dostępne w [`docs/audits`](docs/audits/README.md).
 
 ## Polecenia

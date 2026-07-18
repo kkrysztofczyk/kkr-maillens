@@ -51,6 +51,7 @@ public sealed class ContentExtractionTests
         Assert.AreEqual("text/html", result.DetectedMimeType);
         Assert.AreEqual("Neutralny tekst", result.CleanText);
         Assert.IsFalse(result.CleanText.Contains("ignore", StringComparison.Ordinal));
+        Assert.IsFalse(result.RawText.Contains("<script", StringComparison.OrdinalIgnoreCase));
     }
 
     [TestMethod]
@@ -61,6 +62,31 @@ public sealed class ContentExtractionTests
         ExtractionResult result = dispatcher.Extract("record.txt", "text/plain", Encoding.UTF8.GetBytes("neutralny tekst"));
 
         Assert.AreEqual("neutraln", result.CleanText);
+        Assert.IsTrue(result.WasTruncated);
+    }
+
+    [TestMethod]
+    public void Extract_TruncationDoesNotSplitUnicodeSurrogatePair()
+    {
+        var dispatcher = new ContentExtractionDispatcher(options: new TextExtractionOptions(MaxCharacters: 2));
+
+        ExtractionResult result = dispatcher.Extract(
+            "record.txt", "text/plain", Encoding.UTF8.GetBytes("A😀B"));
+
+        Assert.AreEqual("A", result.CleanText);
+        Assert.IsTrue(result.WasTruncated);
+        Assert.IsFalse(result.RawText.Any(char.IsSurrogate));
+    }
+
+    [TestMethod]
+    public void ResultBuilderAppliesIndependentRawAndCleanBudgets()
+    {
+        ExtractionResult result = ExtractionResultBuilder.Build("text/plain",
+            [new SegmentDraft(" A "), new SegmentDraft(" B ")],
+            new TextExtractionOptions(MaxCharacters: 5));
+
+        Assert.IsLessThanOrEqualTo(5, result.RawText.Length);
+        Assert.IsLessThanOrEqualTo(5, result.CleanText.Length);
         Assert.IsTrue(result.WasTruncated);
     }
 

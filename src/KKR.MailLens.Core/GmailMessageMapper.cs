@@ -80,12 +80,7 @@ static partial class GmailMessageMapper
     }
 
     public static byte[] DecodeBase64Url(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return Array.Empty<byte>();
-        string padded = value.Replace('-', '+').Replace('_', '/');
-        padded += (padded.Length % 4) switch { 2 => "==", 3 => "=", _ => "" };
-        return Convert.FromBase64String(padded);
-    }
+        => Base64Url.Decode(value, "Nieprawidłowa treść Base64URL wiadomości Gmail.");
 
     public static string HtmlToText(string html)
     {

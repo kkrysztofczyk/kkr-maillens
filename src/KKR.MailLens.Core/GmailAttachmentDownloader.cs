@@ -7,6 +7,7 @@ sealed record DownloadedAttachment(byte[] Bytes, string Sha256, string DetectedM
 static class GmailAttachmentDownloader
 {
     public const long DefaultMaximumBytes = 50L * 1024 * 1024;
+    const long MinimumSizeToleranceBytes = 4 * 1024;
 
     public static async Task<DownloadedAttachment> DownloadAsync(IGmailApiClient api, string messageId,
         GmailAttachmentRecord attachment, long maximumBytes = DefaultMaximumBytes,
@@ -26,8 +27,13 @@ static class GmailAttachmentDownloader
         {
             if (bytes.Length == 0) throw new InvalidDataException("Załącznik Gmail jest pusty.");
             if (bytes.LongLength > maximumBytes) throw new InvalidDataException("Pobrany załącznik przekracza dozwolony limit rozmiaru.");
-            if (attachment.SizeBytes > 0 && bytes.LongLength != attachment.SizeBytes)
-                throw new InvalidDataException("Rozmiar pobranego załącznika nie zgadza się z metadanymi Gmail.");
+            if (attachment.SizeBytes > 0)
+            {
+                long tolerance = Math.Max(MinimumSizeToleranceBytes, attachment.SizeBytes / 100);
+                long difference = Math.Abs(bytes.LongLength - attachment.SizeBytes);
+                if (difference > tolerance)
+                    throw new InvalidDataException("Rozmiar pobranego załącznika istotnie różni się od metadanych Gmail.");
+            }
 
             string sha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
             string detectedMimeType = FileTypeDetector.Detect(attachment.Filename, attachment.MimeType, bytes).MimeType;
@@ -41,12 +47,6 @@ static class GmailAttachmentDownloader
     }
 
     public static byte[] DecodeBase64Url(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return Array.Empty<byte>();
-        string normalized = value.Replace('-', '+').Replace('_', '/');
-        normalized = normalized.PadRight(normalized.Length + ((4 - normalized.Length % 4) % 4), '=');
-        try { return Convert.FromBase64String(normalized); }
-        catch (FormatException ex) { throw new InvalidDataException("Nieprawidłowe dane Base64URL załącznika Gmail.", ex); }
-    }
+        => Base64Url.Decode(value, "Nieprawidłowe dane Base64URL załącznika Gmail.");
 
 }

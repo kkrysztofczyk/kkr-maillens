@@ -37,13 +37,18 @@ public sealed class GmailAttachmentDownloaderTests
     }
 
     [TestMethod]
-    public async Task InvalidSizeAndLimit_AreRejected()
+    public async Task ApproximateSizeIsAcceptedButGrossMismatchAndLimitAreRejected()
     {
         byte[] content = Encoding.UTF8.GetBytes("Neutralny tekst");
         var wrongSize = new GmailAttachmentRecord("2", "", Base64Url(content), "record.txt",
             "text/plain", content.Length + 1, "", false);
+        DownloadedAttachment approximate = await GmailAttachmentDownloader.DownloadAsync(
+            new FakeGmailApiClient(), "m1", wrongSize);
+        CollectionAssert.AreEqual(content, approximate.Bytes);
+
+        var grossMismatch = wrongSize with { SizeBytes = content.Length + 5_000 };
         await Assert.ThrowsExactlyAsync<InvalidDataException>(() =>
-            GmailAttachmentDownloader.DownloadAsync(new FakeGmailApiClient(), "m1", wrongSize));
+            GmailAttachmentDownloader.DownloadAsync(new FakeGmailApiClient(), "m1", grossMismatch));
 
         var tooLarge = wrongSize with { SizeBytes = 100 };
         await Assert.ThrowsExactlyAsync<InvalidDataException>(() =>

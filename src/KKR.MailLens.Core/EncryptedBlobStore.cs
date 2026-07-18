@@ -118,7 +118,6 @@ sealed class EncryptedBlobStore
         nonce.CopyTo(result, Magic.Length + 1);
         tag.CopyTo(result, Magic.Length + 1 + NonceSize);
         ciphertext.CopyTo(result, Magic.Length + 1 + NonceSize + TagSize);
-        CryptographicOperations.ZeroMemory(ciphertext);
         return result;
     }
 

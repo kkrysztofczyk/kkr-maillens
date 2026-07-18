@@ -97,7 +97,7 @@ run\KKR.MailLens.exe rebuild-content-index</pre>
 
   <section>
     <h2>Model bezpieczeństwa i audyty</h2>
-    <p>SQLCipher i AES-GCM chronią dane w spoczynku. Tokeny OAuth oraz hasła IMAP są związane z kluczem aktywnej sesji przez AES-GCM i dodatkowo chronione przez DPAPI <code>CurrentUser</code>; starsze dane DPAPI-only są migrowane po odblokowaniu. Projekt nie chroni przed złośliwym procesem działającym jako ten sam użytkownik Windows podczas odblokowanej sesji.</p>
+    <p>SQLCipher i AES-GCM chronią dane w spoczynku. Tokeny OAuth oraz hasła IMAP są związane z kluczem aktywnej sesji przez AES-GCM i dodatkowo chronione przez DPAPI <code>CurrentUser</code>; starsze dane DPAPI-only są migrowane po odblokowaniu. Projekt nie chroni przed złośliwym procesem działającym jako ten sam użytkownik Windows podczas odblokowanej sesji. W trybie bez klucza sprzętowego należy wybrać długą frazę; aplikacja nie przypisuje krótkiemu PIN-owi wysokiej entropii.</p>
     <p>Historyczne raporty oraz aktualny status ustaleń znajdują się w <a href="docs/audits/README.md"><code>docs/audits</code></a>.</p>
   </section>
 

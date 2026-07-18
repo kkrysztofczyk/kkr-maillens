@@ -10,7 +10,9 @@ sealed class PlainTextExtractor : IContentExtractor
     {
         DecodedText decoded = TextDecoder.Decode(file.Content, options);
         string clean = TextNormalizer.Normalize(decoded.Text);
-        return new ExtractionResult(file.MimeType, decoded.Text, clean, decoded.WasTruncated,
+        bool truncated = decoded.WasTruncated || clean.Length > options.MaxCharacters;
+        clean = TextLimit.Take(clean, options.MaxCharacters);
+        return new ExtractionResult(file.MimeType, decoded.Text, clean, truncated,
             [new ExtractedSegment(0, decoded.Text, clean)]);
     }
 }
@@ -26,12 +28,17 @@ sealed class HtmlContentExtractor : IContentExtractor
         bool truncated = decoded.WasTruncated;
         if (text.Length > options.MaxCharacters)
         {
-            text = text[..options.MaxCharacters];
+            text = TextLimit.Take(text, options.MaxCharacters);
             truncated = true;
         }
         string clean = TextNormalizer.Normalize(text);
-        return new ExtractionResult("text/html", decoded.Text, clean, truncated,
-            [new ExtractedSegment(0, decoded.Text, clean)]);
+        if (clean.Length > options.MaxCharacters)
+        {
+            clean = TextLimit.Take(clean, options.MaxCharacters);
+            truncated = true;
+        }
+        return new ExtractionResult("text/html", text, clean, truncated,
+            [new ExtractedSegment(0, text, clean)]);
     }
 }
 
@@ -50,7 +57,7 @@ static class TextDecoder
         (Encoding encoding, int preambleLength) = DetectEncoding(content);
         string text = encoding.GetString(content, preambleLength, content.Length - preambleLength);
         bool truncated = text.Length > options.MaxCharacters;
-        if (truncated) text = text[..options.MaxCharacters];
+        if (truncated) text = TextLimit.Take(text, options.MaxCharacters);
         return new DecodedText(text, truncated);
     }
 

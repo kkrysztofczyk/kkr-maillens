@@ -94,6 +94,31 @@ public sealed class TesseractOcrTests
         }
     }
 
+    [TestMethod]
+    public async Task Engine_PreservesStderrWhenChildClosesInputPipe()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "kkr-maillens-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string executable = Path.Combine(directory, "failed-tesseract.cmd");
+            File.WriteAllText(executable,
+                "@echo off\r\necho Neutralny blad procesu OCR 1>&2\r\nexit /b 7\r\n");
+            var engine = new TesseractOcrEngine(new TesseractOptions(
+                executable, "pol+eng", TimeSpan.FromSeconds(5)));
+            byte[] image = new byte[8 * 1024 * 1024];
+
+            InvalidOperationException error = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                () => engine.ExtractAsync(image, "image/png"));
+
+            StringAssert.Contains(error.Message, "Neutralny blad procesu OCR");
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch { }
+        }
+    }
+
     static string CreateFakeTesseract(string directory, bool delay)
     {
         string path = Path.Combine(directory, delay ? "slow-tesseract.cmd" : "fake-tesseract.cmd");

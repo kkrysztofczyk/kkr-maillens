@@ -150,7 +150,9 @@ static class ProcessingJobRepository
                 status=CASE WHEN attempts>=max_attempts THEN 'failed' ELSE 'pending' END,
                 available_at=$now,locked_by=NULL,locked_at=NULL,lease_until=NULL,
                 completed_at=CASE WHEN attempts>=max_attempts THEN $now ELSE NULL END,
-                error_code='lease-expired',error_message='Worker utracił lease zadania.'
+                error_code=COALESCE(error_code,'lease-expired'),
+                error_message=CASE WHEN error_code IS NULL
+                    THEN 'Worker utracił lease zadania.' ELSE error_message END
             WHERE status='running' AND lease_until<=$now;
             """, ("$now", Stamp(now)));
     }

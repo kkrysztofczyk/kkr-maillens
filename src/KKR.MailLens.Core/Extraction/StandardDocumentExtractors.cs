@@ -217,23 +217,27 @@ static class ExtractionResultBuilder
 {
     public static ExtractionResult Build(string mimeType, IEnumerable<SegmentDraft> drafts, TextExtractionOptions options)
     {
-        int remaining = options.MaxCharacters;
+        int remainingClean = options.MaxCharacters;
+        int remainingRaw = options.MaxCharacters;
         bool truncated = false;
         var segments = new List<ExtractedSegment>();
         foreach (SegmentDraft draft in drafts)
         {
             string clean = TextNormalizer.Normalize(draft.RawText);
             if (clean.Length == 0) continue;
-            if (remaining == 0) { truncated = true; break; }
-            if (clean.Length > remaining)
-            {
-                clean = clean[..remaining];
-                truncated = true;
-            }
-            string raw = draft.RawText.Length > remaining ? draft.RawText[..remaining] : draft.RawText;
+            int separator = segments.Count == 0 ? 0 : 2;
+            if (remainingClean <= separator || remainingRaw <= separator) { truncated = true; break; }
+            remainingClean -= separator;
+            remainingRaw -= separator;
+            string raw = TextLimit.Take(draft.RawText, remainingRaw);
+            string limitedClean = TextLimit.Take(clean, remainingClean);
+            if (raw.Length != draft.RawText.Length || limitedClean.Length != clean.Length) truncated = true;
+            clean = limitedClean;
+            if (clean.Length == 0) break;
             segments.Add(new ExtractedSegment(segments.Count, raw, clean, draft.PageNumber,
                 draft.SlideNumber, draft.SheetName, draft.Heading));
-            remaining -= clean.Length;
+            remainingClean -= clean.Length;
+            remainingRaw -= raw.Length;
         }
 
         string rawText = string.Join("\n\n", segments.Select(segment => segment.RawText));

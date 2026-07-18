@@ -51,6 +51,20 @@ interface IContentExtractor
     ExtractionResult Extract(DetectedFile file, TextExtractionOptions options);
 }
 
+static class TextLimit
+{
+    public static string Take(string value, int maximumCharacters)
+    {
+        if (maximumCharacters < 0) throw new ArgumentOutOfRangeException(nameof(maximumCharacters));
+        if (value.Length <= maximumCharacters) return value;
+        int length = maximumCharacters;
+        if (length > 0 && char.IsHighSurrogate(value[length - 1])
+            && length < value.Length && char.IsLowSurrogate(value[length]))
+            length--;
+        return value[..length];
+    }
+}
+
 sealed class ContentExtractionDispatcher
 {
     readonly IReadOnlyList<IContentExtractor> extractors;

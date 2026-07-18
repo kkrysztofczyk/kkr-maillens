@@ -56,6 +56,31 @@ public sealed class ProcessingJobRepositoryTests
     }
 
     [TestMethod]
+    public void ExpiredLease_PreservesEarlierDiagnosticOnFinalAttempt()
+    {
+        using var db = new TestDatabase();
+        long attachmentId = AddAttachment(db);
+        DateTimeOffset now = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        ProcessingJobRepository.Enqueue(db.Connection, "extract", attachmentId,
+            priority: 10, maxAttempts: 1, availableAt: now);
+        ProcessingJobRepository.LeaseNext(db.Connection, "worker-1", TimeSpan.FromMinutes(1), now);
+        using (var command = db.Connection.CreateCommand())
+        {
+            command.CommandText = """
+                UPDATE processing_jobs SET error_code='neutral-error',error_message='Neutralny błąd diagnostyczny'
+                WHERE job_type='extract';
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        _ = ProcessingJobRepository.LeaseNext(
+            db.Connection, "worker-2", TimeSpan.FromMinutes(1), now.AddMinutes(2));
+
+        Assert.AreEqual("neutral-error", db.ScalarText(
+            "SELECT error_code FROM processing_jobs WHERE job_type='extract';"));
+    }
+
+    [TestMethod]
     public void RenewLease_ExtendsOnlyLeaseOwnedByWorker()
     {
         using var db = new TestDatabase();

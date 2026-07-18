@@ -60,6 +60,13 @@ sealed class TesseractOcrEngine
             TryKill(process);
             throw new TimeoutException($"Tesseract przekroczył limit {options.EffectiveTimeout.TotalSeconds:0} s.");
         }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+        {
+            TryKill(process);
+            string error = await DiagnosticAsync(errorTask).ConfigureAwait(false);
+            string detail = error.Length == 0 ? ex.Message : error;
+            throw new InvalidOperationException($"Tesseract przerwał strumień wejściowy: {Limit(detail)}", ex);
+        }
         catch
         {
             TryKill(process);
@@ -103,6 +110,12 @@ sealed class TesseractOcrEngine
     {
         try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
         catch { }
+    }
+
+    static async Task<string> DiagnosticAsync(Task<string> errorTask)
+    {
+        try { return await errorTask.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false); }
+        catch { return ""; }
     }
 
     static string Limit(string value)
