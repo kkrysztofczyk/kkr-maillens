@@ -87,6 +87,39 @@ public sealed class PdfOcrTests
         }
     }
 
+    [TestMethod]
+    public async Task OcrPipeline_BlankScannedPageKeepsTextPagesAndCompletes()
+    {
+        using var db = new TestDatabase();
+        string directory = Path.Combine(Path.GetTempPath(), "kkr-maillens-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string executable = Path.Combine(directory, "blank-pdf-tesseract.cmd");
+            File.WriteAllText(executable, "@echo off\r\nmore >nul\r\n");
+            long attachmentId = AddPdfAttachment(db);
+            var store = new EncryptedBlobStore(Path.Combine(directory, "blobs"), new string('F', 64));
+            StoredBlob blob = store.Put(db.Connection, CreatePdf(TextPage, ""));
+            MailAttachmentRepository.MarkDownloaded(db.Connection, attachmentId, blob, "application/pdf");
+            long documentId = ContentDocumentRepository.EnsureAttachmentDocument(
+                db.Connection, attachmentId, blob.Sha256, "application/pdf");
+            AttachmentExtractionProcessor.Process(db.Connection, store, attachmentId, documentId);
+
+            await OcrAttachmentProcessor.ProcessAsync(db.Connection, store, attachmentId, documentId,
+                new TesseractOptions(executable, "pol+eng", TimeSpan.FromSeconds(5)),
+                CancellationToken.None, new FakeRenderer(),
+                new PdfRenderOptions(72, 5, TimeSpan.FromSeconds(5)));
+
+            Assert.AreEqual("completed", db.ScalarText("SELECT status FROM content_documents;"));
+            Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM content_segments;"));
+            Assert.AreEqual(TextPage, db.ScalarText("SELECT clean_text FROM content_segments WHERE page_number=1;"));
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch { }
+        }
+    }
+
     static string CreateFakeTesseract(string directory)
     {
         string path = Path.Combine(directory, "fake-pdf-tesseract.cmd");

@@ -133,17 +133,15 @@ static class OcrAttachmentProcessor
                     pdfRenderer ?? new PdfiumPageRenderer(), pdfOptions ?? new PdfRenderOptions(),
                     cancellationToken, heartbeat).ConfigureAwait(false);
                 ContentDocumentRepository.SaveExtraction(connection, documentId, result,
-                    "pdfpig+tesseract", "1", modelName: options.Languages);
+                    "pdfpig+tesseract", "1", modelName: options.Languages, ocrCompleted: true);
             }
             else
             {
                 ExtractionResult result = await engine.ExtractAsync(plaintext, detected.MimeType, cancellationToken)
                     .ConfigureAwait(false);
-                if (result.CleanText.Length == 0)
-                    throw new InvalidDataException("Tesseract nie zwrócił użytecznego tekstu.");
                 heartbeat?.Invoke();
                 ContentDocumentRepository.SaveExtraction(connection, documentId, result, "tesseract", "cli-v1",
-                    documentKind: "ocr", modelName: options.Languages);
+                    documentKind: "ocr", modelName: options.Languages, ocrCompleted: true);
             }
         }
         finally
@@ -181,9 +179,8 @@ static class OcrAttachmentProcessor
             {
                 ExtractionResult pageResult = await engine.ExtractAsync(png, "image/png", cancellationToken)
                     .ConfigureAwait(false);
-                if (pageResult.CleanText.Length == 0)
-                    throw new InvalidDataException($"Tesseract nie zwrócił użytecznego tekstu dla strony {pageNumber}.");
-                ocrSegments.Add(new SegmentDraft(pageResult.RawText, PageNumber: pageNumber));
+                if (pageResult.CleanText.Length > 0)
+                    ocrSegments.Add(new SegmentDraft(pageResult.RawText, PageNumber: pageNumber));
                 heartbeat?.Invoke();
             }
             finally

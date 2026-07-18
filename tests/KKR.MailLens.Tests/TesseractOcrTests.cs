@@ -44,6 +44,37 @@ public sealed class TesseractOcrTests
     }
 
     [TestMethod]
+    public async Task OcrPipeline_BlankImageCompletesWithoutSegments()
+    {
+        using var db = new TestDatabase();
+        string directory = Path.Combine(Path.GetTempPath(), "kkr-maillens-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string executable = CreateBlankTesseract(directory);
+            long attachmentId = AddImageAttachment(db);
+            var store = new EncryptedBlobStore(Path.Combine(directory, "blobs"), new string('E', 64));
+            byte[] image = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0];
+            StoredBlob blob = store.Put(db.Connection, image);
+            MailAttachmentRepository.MarkDownloaded(db.Connection, attachmentId, blob, "image/png");
+            long documentId = ContentDocumentRepository.EnsureAttachmentDocument(
+                db.Connection, attachmentId, blob.Sha256, "image/png");
+            AttachmentExtractionProcessor.Process(db.Connection, store, attachmentId, documentId);
+
+            await OcrAttachmentProcessor.ProcessAsync(db.Connection, store, attachmentId, documentId,
+                new TesseractOptions(executable, "pol+eng", TimeSpan.FromSeconds(5)), CancellationToken.None);
+
+            Assert.AreEqual("completed", db.ScalarText("SELECT status FROM content_documents;"));
+            Assert.AreEqual("extracted", db.ScalarText("SELECT processing_status FROM mail_attachments;"));
+            Assert.AreEqual(0, db.ScalarLong("SELECT count(*) FROM content_segments;"));
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch { }
+        }
+    }
+
+    [TestMethod]
     public async Task Engine_KillsProcessAfterTimeout()
     {
         string directory = Path.Combine(Path.GetTempPath(), "kkr-maillens-tests", Guid.NewGuid().ToString("N"));
@@ -68,6 +99,13 @@ public sealed class TesseractOcrTests
         string path = Path.Combine(directory, delay ? "slow-tesseract.cmd" : "fake-tesseract.cmd");
         string pause = delay ? "ping 127.0.0.1 -n 6 >nul\r\n" : "";
         File.WriteAllText(path, $"@echo off\r\n{pause}more >nul\r\necho Neutralny tekst OCR\r\n");
+        return path;
+    }
+
+    static string CreateBlankTesseract(string directory)
+    {
+        string path = Path.Combine(directory, "blank-tesseract.cmd");
+        File.WriteAllText(path, "@echo off\r\nmore >nul\r\n");
         return path;
     }
 

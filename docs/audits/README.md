@@ -30,12 +30,12 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Starsze poświadczenia DPAPI-only są migrowane po odblokowaniu; ponowna inicjalizacja usuwa sekrety i bloby poprzedniego korpusu.
 - Zapis strony Gmail obejmuje jedną transakcją wiadomości, korpus/FTS, metadane załączników i enqueue.
 - Zadanie `download` powstaje wyłącznie dla załącznika w stanie `metadata-only`; ponowny upsert nie przetwarza gotowej treści.
-- Zestaw testów wzrósł z historycznych 20/31 do 61 testów.
+- Puste wyniki OCR strony lub obrazu kończą dokument poprawnie, zachowując pozostałe segmenty zamiast oznaczać całość jako `failed`.
+- Zestaw testów wzrósł z historycznych 20/31 do 63 testów.
 
 ### Otwarte — priorytet
 
 - Utwardzić Worker przetwarzający niezaufane dokumenty: limity zasobów i uprawnień oraz testy złośliwych PDF/OOXML.
-- Pusta strona skanu (pusty wynik Tesseracta) nie powinna wywalać całego dokumentu OCR do `failed` — pomijać stronę / zapisywać pusty segment.
 
 ### Otwarte — roadmapa
 

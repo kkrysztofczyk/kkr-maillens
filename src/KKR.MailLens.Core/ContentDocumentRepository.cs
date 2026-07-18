@@ -76,14 +76,15 @@ static class ContentDocumentRepository
     }
 
     public static string SaveExtraction(SqliteConnection connection, long documentId, ExtractionResult result,
-        string extractorName, string extractorVersion, string documentKind = "attachment", string? modelName = null)
+        string extractorName, string extractorVersion, string documentKind = "attachment", string? modelName = null,
+        bool ocrCompleted = false)
     {
         string now = DateTimeOffset.UtcNow.ToString("O");
         bool canUseOcr = result.DetectedMimeType == "application/pdf"
             || result.DetectedMimeType.StartsWith("image/", StringComparison.Ordinal);
         bool hasMissingPdfPages = result.DetectedMimeType == "application/pdf"
             && result.OcrPageNumbers.Count > 0;
-        string status = canUseOcr && (result.CleanText.Length == 0 || hasMissingPdfPages)
+        string status = !ocrCompleted && canUseOcr && (result.CleanText.Length == 0 || hasMissingPdfPages)
             ? "needs-ocr"
             : "completed";
         using var transaction = connection.BeginTransaction();
