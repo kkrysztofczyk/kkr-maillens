@@ -88,6 +88,8 @@ static class Cli
         if (GetStr(args, "--ffmpeg") is { } ffmpeg) { cfg.FfmpegPath = ffmpeg.Trim(); changed = true; }
         if (GetStr(args, "--whisper") is { } whisper) { cfg.WhisperPath = whisper.Trim(); changed = true; }
         if (GetStr(args, "--whisper-model") is { } model) { cfg.WhisperModelPath = model.Trim(); changed = true; }
+        if (GetStr(args, "--whisper-fallback-model") is { } fallbackModel)
+        { cfg.WhisperFallbackModelPath = fallbackModel.Trim(); changed = true; }
         if (GetStr(args, "--whisper-language") is { } language) { cfg.WhisperLanguage = language.Trim(); changed = true; }
         if (GetStr(args, "--ffmpeg-timeout") is { } ffmpegTimeout && int.TryParse(ffmpegTimeout, out int ffmpegSeconds))
         { cfg.FfmpegTimeoutSeconds = Math.Clamp(ffmpegSeconds, 10, 3600); changed = true; }
@@ -134,10 +136,10 @@ static class Cli
         Console.WriteLine($"PaddleOCR    : {(cfg.PaddleOcrEnabled ? "włączony fallback" : "wyłączony")}, {cfg.PaddleOcrModelVersion}/{cfg.PaddleOcrLanguage}, {cfg.PaddleOcrDevice}, próg {cfg.PaddleOcrMinimumConfidence:0.00}, timeout {cfg.PaddleOcrTimeoutSeconds} s");
         Console.WriteLine($"Worker       : limit pamięci {cfg.WorkerMemoryLimitMb} MiB");
         Console.WriteLine($"FFmpeg       : {cfg.FfmpegPath}, timeout {cfg.FfmpegTimeoutSeconds} s");
-        Console.WriteLine($"whisper.cpp  : {cfg.WhisperPath}, model '{cfg.WhisperModelPath}', język {cfg.WhisperLanguage}, timeout {cfg.WhisperTimeoutSeconds} s");
+        Console.WriteLine($"whisper.cpp  : {cfg.WhisperPath}, model '{cfg.WhisperModelPath}', fallback '{cfg.WhisperFallbackModelPath}', język {cfg.WhisperLanguage}, timeout {cfg.WhisperTimeoutSeconds} s/model");
         Console.WriteLine($"Transkrypcja : max {cfg.TranscriptionMaxMinutes} min");
         Console.WriteLine($"Semantyczne  : {(cfg.SemanticEnabled ? "włączone" : "wyłączone")}, model {cfg.EmbeddingModel}, endpoint {cfg.EmbeddingEndpoint}, batch {cfg.EmbeddingBatchSize}, kandydaci {cfg.SemanticMaxCandidates}");
-        if (!changed) Console.WriteLine("Zmiana: config [--store <fragment>] [--max N] [--tesseract <sciezka>] [--ocr-languages pol+eng] [--ocr-timeout N] [--ocr-pdf-dpi N] [--ocr-max-pdf-pages N] [--ocr-pdf-render-timeout N] [--ocr-pdf-batch-size N] [--paddleocr-enabled true|false] [--paddleocr-python <sciezka>] [--paddleocr-runner <plik>] [--paddleocr-language pl] [--paddleocr-version PP-OCRv6] [--paddleocr-device cpu] [--paddleocr-min-confidence 0.5] [--paddleocr-timeout N] [--worker-memory-mb N] [--ffmpeg <sciezka>] [--whisper <sciezka>] [--whisper-model <plik>] [--whisper-language auto] [--ffmpeg-timeout N] [--whisper-timeout N] [--transcription-max-minutes N] [--semantic-enabled true|false] [--embedding-endpoint URL] [--embedding-model NAME] [--embedding-batch-size N] [--embedding-timeout N] [--semantic-max-candidates N]");
+        if (!changed) Console.WriteLine("Zmiana: config [--store <fragment>] [--max N] [--tesseract <sciezka>] [--ocr-languages pol+eng] [--ocr-timeout N] [--ocr-pdf-dpi N] [--ocr-max-pdf-pages N] [--ocr-pdf-render-timeout N] [--ocr-pdf-batch-size N] [--paddleocr-enabled true|false] [--paddleocr-python <sciezka>] [--paddleocr-runner <plik>] [--paddleocr-language pl] [--paddleocr-version PP-OCRv6] [--paddleocr-device cpu] [--paddleocr-min-confidence 0.5] [--paddleocr-timeout N] [--worker-memory-mb N] [--ffmpeg <sciezka>] [--whisper <sciezka>] [--whisper-model <plik>] [--whisper-fallback-model <plik>] [--whisper-language auto] [--ffmpeg-timeout N] [--whisper-timeout N] [--transcription-max-minutes N] [--semantic-enabled true|false] [--embedding-endpoint URL] [--embedding-model NAME] [--embedding-batch-size N] [--embedding-timeout N] [--semantic-max-candidates N]");
         return 0;
     }
 
@@ -682,6 +684,7 @@ static class Cli
                      [--paddleocr-runner <plik>] [--paddleocr-language pl] [--paddleocr-version PP-OCRv6]
                      [--paddleocr-device cpu] [--paddleocr-min-confidence 0.5] [--paddleocr-timeout N]
                      [--ffmpeg <sciezka>] [--whisper <sciezka>] [--whisper-model <plik>]
+                     [--whisper-fallback-model <plik>]
                      [--whisper-language auto] [--ffmpeg-timeout N] [--whisper-timeout N]
                      [--transcription-max-minutes N]
                      [--semantic-enabled true|false] [--embedding-endpoint URL] [--embedding-model NAME]

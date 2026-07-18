@@ -80,11 +80,11 @@ Adapter jest publikowany razem z Workerem w `run\tools\paddleocr_runner.py`. Pie
 Po zainstalowaniu FFmpeg, `whisper-cli` i wielojęzycznego modelu whisper.cpp:
 
 ```powershell
-run\KKR.MailLens.exe config --ffmpeg "C:\Tools\ffmpeg\bin\ffmpeg.exe" --whisper "C:\Tools\whisper.cpp\whisper-cli.exe" --whisper-model "C:\Models\ggml-small.bin" --whisper-language auto
+run\KKR.MailLens.exe config --ffmpeg "C:\Tools\ffmpeg\bin\ffmpeg.exe" --whisper "C:\Tools\whisper.cpp\whisper-cli.exe" --whisper-model "C:\Models\ggml-small.bin" --whisper-fallback-model "C:\Models\ggml-medium.bin" --whisper-language auto
 run\KKR.MailLens.exe processing-run
 ```
 
-Audio z nagrań i filmów jest lokalnie konwertowane do mono PCM 16 kHz. Segmenty transkrypcji zachowują zakres czasu i są dostępne przez `query-content`. Pliki robocze WAV/JSON są usuwane po zadaniu i nie trafiają do repozytorium.
+Audio z nagrań i filmów jest lokalnie konwertowane do mono PCM 16 kHz. Segmenty transkrypcji zachowują zakres czasu i są dostępne przez `query-content`. Pliki robocze WAV/JSON są usuwane po zadaniu i nie trafiają do repozytorium. Opcjonalny model dokładniejszy korzysta z tego samego WAV tylko po pustym wyniku modelu podstawowego i nigdy nie nadpisuje istniejącego tekstu.
 
 ## Lokalne wyszukiwanie semantyczne
 

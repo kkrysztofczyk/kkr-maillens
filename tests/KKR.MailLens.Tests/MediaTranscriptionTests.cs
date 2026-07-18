@@ -121,6 +121,142 @@ public sealed class MediaTranscriptionTests
         }
     }
 
+    [TestMethod]
+    public async Task Toolchain_UsesFallbackModelOnlyAfterEmptyPrimaryTranscript()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "kkr-maillens-transcription-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string ffmpeg = WriteFakeFfmpeg(directory);
+            string whisper = Path.Combine(directory, "fallback-whisper.cmd");
+            File.WriteAllText(whisper, """
+                @echo off
+                set "model="
+                set "prefix="
+                :loop
+                if "%~1"=="" goto write
+                if /I "%~1"=="-m" goto model
+                if /I "%~1"=="-of" goto prefix
+                shift
+                goto loop
+                :model
+                shift
+                set "model=%~1"
+                shift
+                goto loop
+                :prefix
+                shift
+                set "prefix=%~1"
+                shift
+                goto loop
+                :write
+                echo %model% | findstr /I "medium" >nul
+                if errorlevel 1 goto empty
+                > "%prefix%.json" echo {"result":{"language":"pl"},"transcription":[{"offsets":{"from":3000,"to":5000},"text":"Neutralny tekst modelu fallback"}]}
+                exit /b 0
+                :empty
+                > "%prefix%.json" echo {"result":{"language":"pl"},"transcription":[]}
+                exit /b 0
+                """.Replace("\n", "\r\n", StringComparison.Ordinal));
+            string small = Path.Combine(directory, "ggml-small.bin");
+            string medium = Path.Combine(directory, "ggml-medium.bin");
+            await File.WriteAllBytesAsync(small, [1]);
+            await File.WriteAllBytesAsync(medium, [2]);
+            string temp = Path.Combine(directory, "temp");
+            var transcriber = new FfmpegWhisperTranscriber(new MediaTranscriptionOptions(
+                ffmpeg, whisper, small, "auto", TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5),
+                MaxDurationMinutes: 1, TempDirectory: temp, FallbackModelPath: medium));
+
+            ExtractionResult result = await transcriber.TranscribeAsync([1, 2, 3, 4], "audio/mp4");
+
+            Assert.AreEqual("Neutralny tekst modelu fallback", result.CleanText);
+            Assert.AreEqual("ggml-medium.bin", transcriber.ModelName);
+            Assert.AreEqual(3000L, result.Segments.Single().StartMs);
+            Assert.IsFalse(Directory.EnumerateDirectories(temp, "transcription-*").Any());
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch { }
+        }
+    }
+
+    [TestMethod]
+    public async Task Toolchain_KeepsPrimaryTranscriptWithoutStartingFallbackModel()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "kkr-maillens-transcription-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string ffmpeg = WriteFakeFfmpeg(directory);
+            string marker = Path.Combine(directory, "fallback-started.txt");
+            string whisper = Path.Combine(directory, "primary-whisper.cmd");
+            string script = """
+                @echo off
+                set "model="
+                set "prefix="
+                :loop
+                if "%~1"=="" goto write
+                if /I "%~1"=="-m" goto model
+                if /I "%~1"=="-of" goto prefix
+                shift
+                goto loop
+                :model
+                shift
+                set "model=%~1"
+                shift
+                goto loop
+                :prefix
+                shift
+                set "prefix=%~1"
+                shift
+                goto loop
+                :write
+                echo %model% | findstr /I "medium" >nul
+                if not errorlevel 1 > "__MARKER__" echo started
+                > "%prefix%.json" echo {"result":{"language":"pl"},"transcription":[{"offsets":{"from":1000,"to":2000},"text":"Test Record"}]}
+                exit /b 0
+                """;
+            File.WriteAllText(whisper, script.Replace("__MARKER__", marker, StringComparison.Ordinal)
+                .Replace("\n", "\r\n", StringComparison.Ordinal));
+            string small = Path.Combine(directory, "ggml-small.bin");
+            string medium = Path.Combine(directory, "ggml-medium.bin");
+            await File.WriteAllBytesAsync(small, [1]);
+            await File.WriteAllBytesAsync(medium, [2]);
+            var transcriber = new FfmpegWhisperTranscriber(new MediaTranscriptionOptions(
+                ffmpeg, whisper, small, FfmpegTimeout: TimeSpan.FromSeconds(5),
+                WhisperTimeout: TimeSpan.FromSeconds(5), MaxDurationMinutes: 1,
+                TempDirectory: Path.Combine(directory, "temp"), FallbackModelPath: medium));
+
+            ExtractionResult result = await transcriber.TranscribeAsync([1, 2, 3, 4], "audio/mp4");
+
+            Assert.AreEqual("Test Record", result.CleanText);
+            Assert.AreEqual("ggml-small.bin", transcriber.ModelName);
+            Assert.IsFalse(File.Exists(marker));
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch { }
+        }
+    }
+
+    static string WriteFakeFfmpeg(string directory)
+    {
+        string ffmpeg = Path.Combine(directory, "fake-fallback-ffmpeg.cmd");
+        File.WriteAllText(ffmpeg, """
+            @echo off
+            set "out="
+            :loop
+            if "%~1"=="" goto done
+            set "out=%~1"
+            shift
+            goto loop
+            :done
+            more > "%out%"
+            """.Replace("\n", "\r\n", StringComparison.Ordinal));
+        return ffmpeg;
+    }
+
     static long AddMediaAttachment(TestDatabase db)
     {
         GmailAccountRecord account = db.AddAccount();

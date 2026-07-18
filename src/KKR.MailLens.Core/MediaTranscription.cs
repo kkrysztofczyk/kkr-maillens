@@ -14,7 +14,8 @@ sealed record MediaTranscriptionOptions(
     TimeSpan? FfmpegTimeout = null,
     TimeSpan? WhisperTimeout = null,
     int MaxDurationMinutes = 120,
-    string? TempDirectory = null)
+    string? TempDirectory = null,
+    string? FallbackModelPath = null)
 {
     public TimeSpan EffectiveFfmpegTimeout => FfmpegTimeout ?? TimeSpan.FromMinutes(10);
     public TimeSpan EffectiveWhisperTimeout => WhisperTimeout ?? TimeSpan.FromHours(1);
@@ -25,6 +26,8 @@ sealed record MediaTranscriptionOptions(
         if (string.IsNullOrWhiteSpace(WhisperPath)) throw new ArgumentException("Brak ścieżki do whisper.cpp.", nameof(WhisperPath));
         if (string.IsNullOrWhiteSpace(ModelPath) || !File.Exists(ModelPath))
             throw new FileNotFoundException("Nie znaleziono lokalnego modelu whisper.cpp.", ModelPath);
+        if (!string.IsNullOrWhiteSpace(FallbackModelPath) && !File.Exists(FallbackModelPath))
+            throw new FileNotFoundException("Nie znaleziono lokalnego modelu fallback whisper.cpp.", FallbackModelPath);
         if (string.IsNullOrWhiteSpace(Language) || Language.Any(character =>
                 !(char.IsAsciiLetterOrDigit(character) || character is '-' or '_')))
             throw new ArgumentException("Nieprawidłowy język transkrypcji.", nameof(Language));
@@ -44,14 +47,16 @@ interface IMediaTranscriber
 sealed class FfmpegWhisperTranscriber : IMediaTranscriber
 {
     readonly MediaTranscriptionOptions options;
+    string modelName;
 
     public FfmpegWhisperTranscriber(MediaTranscriptionOptions options)
     {
         this.options = options;
         options.Validate();
+        modelName = Path.GetFileName(options.ModelPath);
     }
 
-    public string ModelName => Path.GetFileName(options.ModelPath);
+    public string ModelName => modelName;
 
     public async Task<ExtractionResult> TranscribeAsync(byte[] media, string mimeType,
         CancellationToken cancellationToken = default)
@@ -63,8 +68,25 @@ sealed class FfmpegWhisperTranscriber : IMediaTranscriber
         using var workspace = TranscriptionWorkspace.Create(options.TempDirectory ?? Paths.TempDir);
         string wavPath = Path.Combine(workspace.DirectoryPath, "audio.wav");
         string outputPrefix = Path.Combine(workspace.DirectoryPath, "transcript");
+        modelName = Path.GetFileName(options.ModelPath);
         await RunFfmpeg(media, wavPath, cancellationToken).ConfigureAwait(false);
-        await RunWhisper(wavPath, outputPrefix, cancellationToken).ConfigureAwait(false);
+        ExtractionResult primary = await TranscribeWav(wavPath, outputPrefix, options.ModelPath,
+            mimeType, cancellationToken).ConfigureAwait(false);
+        if (primary.CleanText.Length > 0 || string.IsNullOrWhiteSpace(options.FallbackModelPath))
+            return primary;
+
+        string fallbackPrefix = Path.Combine(workspace.DirectoryPath, "transcript-fallback");
+        ExtractionResult fallback = await TranscribeWav(wavPath, fallbackPrefix, options.FallbackModelPath,
+            mimeType, cancellationToken).ConfigureAwait(false);
+        if (fallback.CleanText.Length == 0) return primary;
+        modelName = Path.GetFileName(options.FallbackModelPath);
+        return fallback;
+    }
+
+    async Task<ExtractionResult> TranscribeWav(string wavPath, string outputPrefix, string modelPath,
+        string mimeType, CancellationToken cancellationToken)
+    {
+        await RunWhisper(wavPath, outputPrefix, modelPath, cancellationToken).ConfigureAwait(false);
         string jsonPath = outputPrefix + ".json";
         if (!File.Exists(jsonPath)) throw new InvalidDataException("whisper.cpp nie utworzył wyniku JSON.");
         string json = await File.ReadAllTextAsync(jsonPath, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
@@ -97,10 +119,11 @@ sealed class FfmpegWhisperTranscriber : IMediaTranscriber
         catch { TryKill(process); throw; }
     }
 
-    async Task RunWhisper(string wavPath, string outputPrefix, CancellationToken cancellationToken)
+    async Task RunWhisper(string wavPath, string outputPrefix, string modelPath,
+        CancellationToken cancellationToken)
     {
         using Process process = Start(options.WhisperPath,
-            ["-m", Path.GetFullPath(options.ModelPath), "-f", wavPath, "-l", options.Language,
+            ["-m", Path.GetFullPath(modelPath), "-f", wavPath, "-l", options.Language,
              "-oj", "-of", outputPrefix, "-np"], redirectInput: false);
         using var timeout = new CancellationTokenSource(options.EffectiveWhisperTimeout);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);

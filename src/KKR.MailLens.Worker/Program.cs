@@ -102,15 +102,19 @@ try
                     AppConfig transcriptionConfig = AppConfig.Load();
                     int ffmpegTimeoutSeconds = Math.Clamp(transcriptionConfig.FfmpegTimeoutSeconds, 10, 3600);
                     int whisperTimeoutSeconds = Math.Clamp(transcriptionConfig.WhisperTimeoutSeconds, 30, 24 * 3600);
+                    bool hasWhisperFallback = !string.IsNullOrWhiteSpace(
+                        transcriptionConfig.WhisperFallbackModelPath);
                     TimeSpan transcriptionLeaseDuration = TimeSpan.FromSeconds(
-                        ffmpegTimeoutSeconds + whisperTimeoutSeconds + 60);
+                        ffmpegTimeoutSeconds + whisperTimeoutSeconds * (hasWhisperFallback ? 2 : 1) + 60);
                     if (!ProcessingJobRepository.RenewLease(connection, job.Id, workerId, transcriptionLeaseDuration))
                         throw new InvalidOperationException("Worker utracił lease zadania transkrypcji.");
                     var transcriptionOptions = new MediaTranscriptionOptions(
                         transcriptionConfig.FfmpegPath, transcriptionConfig.WhisperPath,
                         transcriptionConfig.WhisperModelPath, transcriptionConfig.WhisperLanguage,
                         TimeSpan.FromSeconds(ffmpegTimeoutSeconds), TimeSpan.FromSeconds(whisperTimeoutSeconds),
-                        Math.Clamp(transcriptionConfig.TranscriptionMaxMinutes, 1, 24 * 60));
+                        Math.Clamp(transcriptionConfig.TranscriptionMaxMinutes, 1, 24 * 60),
+                        FallbackModelPath: hasWhisperFallback
+                            ? transcriptionConfig.WhisperFallbackModelPath : null);
                     await MediaTranscriptionProcessor.ProcessAsync(connection, store, job.AttachmentId.Value,
                         job.DocumentId.Value, new FfmpegWhisperTranscriber(transcriptionOptions), shutdown.Token,
                         heartbeat: () =>

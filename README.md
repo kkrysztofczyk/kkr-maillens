@@ -121,12 +121,12 @@ Media są przekazywane do FFmpeg przez `stdin` i normalizowane do mono PCM 16 kH
 Repozytorium nie zawiera binariów ani modelu. Zalecany model początkowy to wielojęzyczny `small`. Po zainstalowaniu lokalnych narzędzi ustaw ścieżki:
 
 ```powershell
-run\KKR.MailLens.exe config --ffmpeg "C:\Tools\ffmpeg\bin\ffmpeg.exe" --whisper "C:\Tools\whisper.cpp\whisper-cli.exe" --whisper-model "C:\Models\ggml-small.bin" --whisper-language auto --ffmpeg-timeout 600 --whisper-timeout 3600 --transcription-max-minutes 120
+run\KKR.MailLens.exe config --ffmpeg "C:\Tools\ffmpeg\bin\ffmpeg.exe" --whisper "C:\Tools\whisper.cpp\whisper-cli.exe" --whisper-model "C:\Models\ggml-small.bin" --whisper-fallback-model "C:\Models\ggml-medium.bin" --whisper-language auto --ffmpeg-timeout 600 --whisper-timeout 3600 --transcription-max-minutes 120
 run\KKR.MailLens.exe processing-run
 run\KKR.MailLens.exe query-content "neutralny tekst"
 ```
 
-Transkrypcja jest całkowicie lokalna, bez diarization i usług sieciowych. Limit pobieranego załącznika Gmail pozostaje bez zmian; domyślnie analizowane jest maksymalnie 120 minut jednego pliku.
+Transkrypcja jest całkowicie lokalna, bez diarization i usług sieciowych. Opcjonalny model fallback korzysta z tego samego lokalnego WAV i uruchamia się wyłącznie wtedy, gdy model podstawowy nie zwróci żadnego tekstu; nie zastępuje istniejącej transkrypcji. Pusta wartość `--whisper-fallback-model ""` wyłącza drugi przebieg. Limit pobieranego załącznika Gmail pozostaje bez zmian; domyślnie analizowane jest maksymalnie 120 minut jednego pliku.
 
 ## Lokalne embeddingi i wyszukiwanie hybrydowe
 

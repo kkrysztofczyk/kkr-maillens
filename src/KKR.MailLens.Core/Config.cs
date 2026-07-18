@@ -32,6 +32,7 @@ sealed class AppConfig
     public string FfmpegPath { get; set; } = "ffmpeg.exe";
     public string WhisperPath { get; set; } = "whisper-cli.exe";
     public string WhisperModelPath { get; set; } = "";
+    public string WhisperFallbackModelPath { get; set; } = "";
     public string WhisperLanguage { get; set; } = "auto";
     public int FfmpegTimeoutSeconds { get; set; } = 600;
     public int WhisperTimeoutSeconds { get; set; } = 3600;
