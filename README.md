@@ -6,7 +6,7 @@ KKR MailLens tworzy lokalny, szyfrowany indeks poczty do wyszukiwania pełnoteks
 
 Aktualnie działa import Outlook/IMAP oraz pełna i przyrostowa synchronizacja Gmail API z CLI. Pipeline Gmail obejmuje trwałą kolejkę, pobieranie załączników, szyfrowany i deduplikowany magazyn blobów, ekstrakcję TXT/HTML/PDF/DOCX/XLSX/PPTX, lokalny OCR obrazów i mieszanych PDF-ów, transkrypcję audio/wideo przez FFmpeg i whisper.cpp oraz osobny indeks `content_fts`.
 
-Nie są jeszcze dostępne: obsługa Gmaila i wyników załączników w GUI, pobieranie załączników Outlook/IMAP, garbage collection osieroconych blobów oraz wyszukiwanie semantyczne. Bieżący status ustaleń technicznych znajduje się w [indeksie audytów](docs/audits/README.md).
+Nie są jeszcze dostępne: obsługa Gmaila i wyników załączników w GUI, pobieranie załączników Outlook/IMAP oraz wyszukiwanie semantyczne. Bieżący status ustaleń technicznych znajduje się w [indeksie audytów](docs/audits/README.md).
 
 ## Wymagania
 
@@ -109,6 +109,17 @@ run\KKR.MailLens.exe query-content "neutralny tekst"
 
 Transkrypcja jest całkowicie lokalna, bez diarization i usług sieciowych. Limit pobieranego załącznika Gmail pozostaje bez zmian; domyślnie analizowane jest maksymalnie 120 minut jednego pliku.
 
+## Konserwacja magazynu blobów
+
+Zaszyfrowany blob może być współdzielony przez wiele wiadomości. Garbage collection usuwa plik dopiero po zniknięciu ostatniej aktywnej referencji i pomija dane używane przez działające zadanie Workera. Najpierw można wykonać bezpieczny podgląd:
+
+```powershell
+run\KKR.MailLens.exe blob-gc --dry-run
+run\KKR.MailLens.exe blob-gc
+```
+
+Operacja usuwa również nieaktualne segmenty, wpisy FTS5 i zadania należące wyłącznie do usuniętych załączników. Przerwanie między usunięciem pliku i zapisem bazy jest bezpieczne — następne uruchomienie dokończy porządkowanie.
+
 ## Neutralne dane przykładowe
 
 - temat: `Test Record`
@@ -137,4 +148,4 @@ Pełną listę poleceń pokazuje:
 run\KKR.MailLens.exe help
 ```
 
-Najważniejsze operacje to `init`, `status`, `lock`, `config`, `harvest`, `account`, `gmail`, `processing-run`, `processing-status`, `processing-retry`, `query`, `query-content`, `rebuild-content-index`, `stats`, `analyze`, `analyze-rules`, `reclassify` i `selftest`.
+Najważniejsze operacje to `init`, `status`, `lock`, `config`, `harvest`, `account`, `gmail`, `processing-run`, `processing-status`, `processing-retry`, `blob-gc`, `query`, `query-content`, `rebuild-content-index`, `stats`, `analyze`, `analyze-rules`, `reclassify` i `selftest`.

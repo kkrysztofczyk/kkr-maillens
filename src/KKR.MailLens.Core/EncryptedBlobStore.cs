@@ -143,9 +143,14 @@ sealed class EncryptedBlobStore
     }
 
     string Absolute(string relative)
+        => ResolvePath(_root, relative);
+
+    internal static string ResolvePath(string root, string relative)
     {
-        string full = Path.GetFullPath(Path.Combine(_root, relative.Replace('/', Path.DirectorySeparatorChar)));
-        string prefix = _root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        string normalizedRoot = Path.GetFullPath(root);
+        string full = Path.GetFullPath(Path.Combine(normalizedRoot, relative.Replace('/', Path.DirectorySeparatorChar)));
+        string prefix = normalizedRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
         if (!full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Ścieżka blobu wychodzi poza magazyn.");
         return full;

@@ -441,6 +441,24 @@ static class Cli
         return 0;
     }
 
+    public static int BlobGc(string[] args)
+    {
+        string? key = RequireKey(); if (key is null) return 2;
+        using var connection = Db.Open(key, create: false);
+        Db.EnsureSchema(connection);
+        if (Flag(args, "--dry-run"))
+        {
+            BlobGarbageCollectionResult preview = BlobGarbageCollector.Preview(connection);
+            Console.WriteLine($"Osierocone bloby: {preview.Orphaned}; możliwe do odzyskania: {FormatBytes(preview.ReclaimedBytes)}.");
+            return 0;
+        }
+
+        BlobGarbageCollectionResult result = BlobGarbageCollector.Collect(connection, Paths.BlobsDir,
+            message => Console.Error.WriteLine(message));
+        Console.WriteLine($"Usunięto blobów: {result.Deleted}/{result.Orphaned}; odzyskano: {FormatBytes(result.ReclaimedBytes)}; błędy: {result.Failed}.");
+        return result.Failed == 0 ? 0 : 1;
+    }
+
     public static int ProcessingRun(string[] args)
     {
         if (RequireKey() is null) return 2;
@@ -571,6 +589,7 @@ static class Cli
               processing-status                    pokaz stan trwalej kolejki zalacznikow
               processing-run [--once]              uruchom osobny proces Worker
               processing-retry                     ponow zadania zakonczone statusem failed
+              blob-gc [--dry-run]                   usun zaszyfrowane bloby bez aktywnych referencji
               selftest                             dowod: SQLCipher szyfruje, zly klucz odrzucony, FTS dziala
 
             Odblokowujesz w GUI (PIN + YubiKey). Klucz zyje tylko w RAM GUI. Bez tego korpus to szyfrogram.
@@ -613,4 +632,13 @@ static class Cli
     static bool Flag(string[] args, string name) => Args.Flag(args, name);
     static string? GetStr(string[] args, string name) => Args.Str(args, name);
     static int GetInt(string[] args, string name, int fallback) => Args.Int(args, name, fallback);
+
+    static string FormatBytes(long bytes)
+    {
+        string[] units = ["B", "KiB", "MiB", "GiB", "TiB"];
+        double value = Math.Max(0, bytes);
+        int unit = 0;
+        while (value >= 1024 && unit < units.Length - 1) { value /= 1024; unit++; }
+        return unit == 0 ? $"{value:0} {units[unit]}" : $"{value:0.##} {units[unit]}";
+    }
 }

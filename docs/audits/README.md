@@ -37,7 +37,10 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Worker uruchamiany przez CLI działa w Windows Job Object z łącznym limitem pamięci obejmującym procesy potomne.
 - Ctrl+C i utrata odblokowanej sesji anulują operacje zewnętrzne; zadanie wraca do kolejki bez zużycia próby.
 - Działa lokalny pipeline FFmpeg → whisper.cpp z timestampami segmentów, FTS5 i sprzątaniem jawnych plików roboczych.
-- Zestaw testów wzrósł z historycznych 20/31 do 70 testów.
+- Garbage collection usuwa wyłącznie bloby bez aktywnych referencji, zachowuje współdzielone bloby i pomija dane używane przez działające zadania.
+- Usunięcie osieroconego blobu czyści nieaktualne dokumenty, segmenty, FTS i zadania usuniętych załączników; `blob-gc --dry-run` udostępnia podgląd.
+- Test odbudowy `content_fts` potwierdza idempotentne odtworzenie indeksu z zapisanych segmentów.
+- Zestaw testów wzrósł z historycznych 20/31 do 74 testów.
 
 ### Otwarte — priorytet
 
@@ -46,7 +49,5 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 ### Otwarte — roadmapa
 
 - Renderowanie stron PDF do OCR w batchach (dziś każdy `RenderAsync` parsuje dokument od nowa).
-- Garbage collection zaszyfrowanych blobów bez referencji.
-- Testy odbudowy FTS i współdzielonych blobów.
 - Obsługa Gmaila i wyników `content_fts` w GUI.
 - Załączniki Outlook/IMAP oraz opcjonalne lokalne AI.

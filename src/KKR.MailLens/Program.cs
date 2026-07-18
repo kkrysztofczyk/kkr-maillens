@@ -29,6 +29,7 @@ return cmd switch
     "processing-status" => Cli.ProcessingStatus(),
     "processing-run" => Cli.ProcessingRun(args),
     "processing-retry" => Cli.ProcessingRetry(),
+    "blob-gc" => Cli.BlobGc(args),
     "yubi-test" => Cli.YubiTest(),
     _ => Cli.Help(),
 };
