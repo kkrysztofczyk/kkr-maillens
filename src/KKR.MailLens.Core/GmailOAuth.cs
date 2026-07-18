@@ -38,17 +38,37 @@ static class GmailOAuth
             string email = profile.EmailAddress?.Trim() ?? "";
             if (email.Length == 0) throw new InvalidOperationException("Gmail API nie zwrocilo adresu polaczonego konta.");
 
-            string proposedTokenKey = "gmail-" + Guid.NewGuid().ToString("N");
-            GmailAccountRecord account = GmailRepository.UpsertAccount(database, email, email, proposedTokenKey);
             TokenResponse? token = await store.GetAsync<TokenResponse>(pendingKey).ConfigureAwait(false);
-            if (token is null || string.IsNullOrWhiteSpace(token.RefreshToken))
-                throw new InvalidOperationException("Google nie zwrocil refresh tokenu. Cofnij zgode aplikacji i polacz konto ponownie.");
-            await store.StoreAsync(account.TokenKey, token).ConfigureAwait(false);
-            return account;
+            return await PersistAuthorizedAccountAsync(database, store, email, token).ConfigureAwait(false);
         }
         finally
         {
             await store.DeleteAsync<TokenResponse>(pendingKey).ConfigureAwait(false);
+        }
+    }
+
+    internal static async Task<GmailAccountRecord> PersistAuthorizedAccountAsync(SqliteConnection database,
+        GmailTokenStore store, string email, TokenResponse? token)
+    {
+        email = email.Trim();
+        if (email.Length == 0) throw new ArgumentException("Brak adresu konta Gmail.", nameof(email));
+        if (token is null || string.IsNullOrWhiteSpace(token.RefreshToken))
+            throw new InvalidOperationException("Google nie zwrocil refresh tokenu. Cofnij zgode aplikacji i polacz konto ponownie.");
+
+        GmailAccountRecord? existing = GmailRepository.FindAccount(database, email);
+        string tokenKey = existing?.TokenKey ?? "gmail-" + Guid.NewGuid().ToString("N");
+        bool stored = false;
+        try
+        {
+            await store.StoreAsync(tokenKey, token).ConfigureAwait(false);
+            stored = true;
+            return GmailRepository.UpsertAccount(database, email, email, tokenKey);
+        }
+        catch
+        {
+            if (stored && existing is null)
+                await store.DeleteAsync<TokenResponse>(tokenKey).ConfigureAwait(false);
+            throw;
         }
     }
 

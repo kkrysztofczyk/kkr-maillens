@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Security.Cryptography;
 
 namespace KKR.MailLens;
 
@@ -8,18 +9,20 @@ static class Cli
 {
     public static int Init(string[] args)
     {
+        if (CommandLineSecurity.ContainsOption(args, "--pin"))
+        {
+            Console.Error.WriteLine("Opcja --pin jest niedozwolona: sekret bylby widoczny w historii powloki i liscie procesow. Podaj PIN interaktywnie albo przez stdin.");
+            return 1;
+        }
         bool force = Flag(args, "--force");
         bool wantYubi = Flag(args, "--yubi");
-        // PIN tylko z --pin albo interaktywnie/stdin. NIE z env (sekret wyciekalby do potomkow/crash-dumpow).
-        string? pin = GetStr(args, "--pin");
-        if (string.IsNullOrEmpty(pin))
+        // PIN tylko interaktywnie lub przez stdin. Argument procesu i env utrwalaja sekret poza aplikacja.
+        string? pin;
+        if (Console.IsInputRedirected) pin = Console.ReadLine();
+        else
         {
-            if (Console.IsInputRedirected) pin = Console.ReadLine();
-            else
-            {
-                pin = PromptMasked("Ustaw PIN: ");
-                if (PromptMasked("Powtorz PIN: ") != pin) { Console.Error.WriteLine("PIN sie nie zgadza."); return 1; }
-            }
+            pin = PromptMasked("Ustaw PIN: ");
+            if (PromptMasked("Powtorz PIN: ") != pin) { Console.Error.WriteLine("PIN sie nie zgadza."); return 1; }
         }
         if (string.IsNullOrEmpty(pin)) { Console.Error.WriteLine("Pusty PIN."); return 1; }
 
@@ -241,17 +244,26 @@ static class Cli
     {
         if (!YubiKey.TryInfo(out var info)) { Console.Error.WriteLine($"YubiKey: {info}"); return 1; }
         Console.WriteLine($"YubiKey: {info}");
-        byte[] challenge = Convert.FromHexString("00112233445566778899aabbccddeeff00112233");
-
-        Console.WriteLine("Challenge-response (SDK). Gdy zobaczysz DOTKNIJ - dotknij zlotego pola:");
-        var r1 = YubiKey.ChallengeResponse(challenge, () => Console.WriteLine("  >>> DOTKNIJ KLUCZA TERAZ <<<"));
-        string hex = Convert.ToHexString(r1).ToLowerInvariant();
-        Console.WriteLine("  odpowiedz: " + hex);
-        bool matchesYkman = hex == "54c594dc8ab34e99584a45960670754b089e0cf6";
-        Console.WriteLine(matchesYkman
-            ? ">>> OK: SDK dziala + odpowiedz zgodna z ykman (HMAC-SHA1 deterministyczny) <<<"
-            : ">>> SDK dziala (odpowiedz jak wyzej; sprawdz czy stabilna miedzy wywolaniami) <<<");
-        return 0;
+        byte[] challenge = RandomNumberGenerator.GetBytes(20);
+        byte[]? response = null;
+        try
+        {
+            Console.WriteLine("Challenge-response (SDK). Gdy zobaczysz DOTKNIJ - dotknij zlotego pola:");
+            response = YubiKey.ChallengeResponse(challenge,
+                () => Console.WriteLine("  >>> DOTKNIJ KLUCZA TERAZ <<<"));
+            if (response.Length != 20 || response.All(value => value == 0))
+            {
+                Console.Error.WriteLine("YubiKey zwrocil nieprawidlowa odpowiedz HMAC-SHA1.");
+                return 1;
+            }
+            Console.WriteLine(">>> OK: SDK i challenge-response dzialaja. Odpowiedz nie jest wyswietlana. <<<");
+            return 0;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(challenge);
+            if (response is not null) CryptographicOperations.ZeroMemory(response);
+        }
     }
 
     // Klucz z agenta (GUI trzyma go w RAM). Bez dzialajacego/odblokowanego GUI = brak sesji.
@@ -259,6 +271,11 @@ static class Cli
 
     public static int ImapAdd(string[] args)
     {
+        if (CommandLineSecurity.ContainsOption(args, "--pass"))
+        {
+            Console.Error.WriteLine("Opcja --pass jest niedozwolona: haslo byloby widoczne w historii powloki i liscie procesow. Podaj je interaktywnie.");
+            return 1;
+        }
         string? key = RequireKey(); if (key is null) return 2;
         var accts = ImapAccounts.Load();
         var a = new ImapAccount();
@@ -270,9 +287,7 @@ static class Cli
         if (string.IsNullOrEmpty(a.Host) || string.IsNullOrEmpty(a.User))
         { Console.Error.WriteLine("Podaj --host i --user."); return 1; }
 
-        // Haslo tylko z --pass albo interaktywnie (nie z env - patrz uwaga o PIN wyzej).
-        string? pass = GetStr(args, "--pass");
-        if (string.IsNullOrEmpty(pass)) pass = PromptMasked($"Haslo / App-Password dla {a.User}: ");
+        string? pass = PromptMasked($"Haslo / App-Password dla {a.User}: ");
         if (string.IsNullOrEmpty(pass)) { Console.Error.WriteLine("Brak hasla."); return 1; }
         a.SetPassword(pass, key);
 
@@ -672,7 +687,7 @@ static class Cli
             Sesje trzyma aplikacja GUI (klucz w RAM). CLI korzysta z niej przez lokalny agent (named pipe).
 
             Komendy:
-              init [--pin <PIN>] [--yubi] [--force]
+              init [--yubi] [--force]
                                                    USTAW PIN (pyta 2x) + zwiaz YubiKey i UTWORZ zaszyfrowana baze.
                                                    Krok pierwszy. --force nadpisuje (KASUJE dane). Potem odblokuj w GUI.
               status                               stan sesji (z agenta GUI) + katalog danych
@@ -705,7 +720,7 @@ static class Cli
               reclassify                           przelicz kind (mail|alert) wg noise-rules.json dla calego korpusu
               analyze [--top N]                    wolumen nadawcow/folderow + podpowiedzi kandydatow na szum
               analyze-rules                        wklad kazdej reguly szumu (brutto/unikat) + zazebienie
-              imap-add --host H --user <adres> [--name N] [--pass P]
+              imap-add --host H --user <adres> [--name N]
                        [--port P --starttls]          dodaj konto IMAP (haslo chronione przez DPAPI)
               imap-list                            wypisz skonfigurowane konta IMAP
               imap-harvest [--account N] [--since yyyy-MM-dd] [--max N]   pobierz z IMAP i zakolejkuj zalaczniki
