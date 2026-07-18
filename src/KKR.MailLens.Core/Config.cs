@@ -19,6 +19,7 @@ sealed class AppConfig
     public int OcrPdfDpi { get; set; } = 300;
     public int OcrMaxPdfPages { get; set; } = 100;
     public int OcrPdfRenderTimeoutSeconds { get; set; } = 120;
+    public int OcrPdfBatchSize { get; set; } = 4;
     public int WorkerMemoryLimitMb { get; set; } = 1536;
     public string FfmpegPath { get; set; } = "ffmpeg.exe";
     public string WhisperPath { get; set; } = "whisper-cli.exe";

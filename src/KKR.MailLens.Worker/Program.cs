@@ -74,7 +74,8 @@ try
                         pdfOptions: new PdfRenderOptions(
                             Math.Clamp(config.OcrPdfDpi, 72, 600),
                             Math.Clamp(config.OcrMaxPdfPages, 1, 10_000),
-                            TimeSpan.FromSeconds(renderTimeoutSeconds)),
+                            TimeSpan.FromSeconds(renderTimeoutSeconds),
+                            Math.Clamp(config.OcrPdfBatchSize, 1, 16)),
                         heartbeat: () =>
                         {
                             shutdown.Token.ThrowIfCancellationRequested();

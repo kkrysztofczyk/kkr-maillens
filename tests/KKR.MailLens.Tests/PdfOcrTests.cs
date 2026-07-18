@@ -120,6 +120,42 @@ public sealed class PdfOcrTests
         }
     }
 
+    [TestMethod]
+    public async Task OcrPipeline_RendersPagesInBoundedBatchesAndZeroesEveryBuffer()
+    {
+        using var db = new TestDatabase();
+        string directory = Path.Combine(Path.GetTempPath(), "kkr-maillens-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string executable = CreateFakeTesseract(directory);
+            long attachmentId = AddPdfAttachment(db);
+            var store = new EncryptedBlobStore(Path.Combine(directory, "blobs"), new string('F', 64));
+            StoredBlob blob = store.Put(db.Connection, CreatePdf("", "", "", "", ""));
+            MailAttachmentRepository.MarkDownloaded(db.Connection, attachmentId, blob, "application/pdf");
+            long documentId = ContentDocumentRepository.EnsureAttachmentDocument(
+                db.Connection, attachmentId, blob.Sha256, "application/pdf");
+            AttachmentExtractionProcessor.Process(db.Connection, store, attachmentId, documentId);
+
+            var renderer = new FakeRenderer();
+            await OcrAttachmentProcessor.ProcessAsync(db.Connection, store, attachmentId, documentId,
+                new TesseractOptions(executable, "pol+eng", TimeSpan.FromSeconds(5)),
+                CancellationToken.None, renderer,
+                new PdfRenderOptions(72, 10, TimeSpan.FromSeconds(5), BatchSize: 2));
+
+            Assert.HasCount(3, renderer.Requests);
+            CollectionAssert.AreEqual(new[] { 1, 2 }, renderer.Requests[0]);
+            CollectionAssert.AreEqual(new[] { 3, 4 }, renderer.Requests[1]);
+            CollectionAssert.AreEqual(new[] { 5 }, renderer.Requests[2]);
+            Assert.AreEqual(5, db.ScalarLong("SELECT count(*) FROM content_segments;"));
+            Assert.IsTrue(renderer.ReturnedBuffers.All(buffer => buffer.All(value => value == 0)));
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch { }
+        }
+    }
+
     static string CreateFakeTesseract(string directory)
     {
         string path = Path.Combine(directory, "fake-pdf-tesseract.cmd");
@@ -187,6 +223,8 @@ public sealed class PdfOcrTests
     sealed class FakeRenderer : IPdfPageRenderer
     {
         public List<int> RequestedPages { get; } = [];
+        public List<int[]> Requests { get; } = [];
+        public List<byte[]> ReturnedBuffers { get; } = [];
 
         public Task<IReadOnlyList<RenderedPdfPage>> RenderAsync(byte[] pdf,
             IReadOnlyList<int> pageNumbers, PdfRenderOptions options,
@@ -194,10 +232,12 @@ public sealed class PdfOcrTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             RequestedPages.AddRange(pageNumbers);
+            Requests.Add(pageNumbers.ToArray());
             IReadOnlyList<RenderedPdfPage> result = pageNumbers
                 .Select(page => new RenderedPdfPage(page,
                     [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))
                 .ToArray();
+            ReturnedBuffers.AddRange(result.Select(page => page.PngBytes));
             return Task.FromResult(result);
         }
     }

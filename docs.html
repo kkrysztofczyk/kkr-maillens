@@ -81,9 +81,9 @@ run\KKR.MailLens.exe query-content "neutralny tekst"</pre>
   <section>
     <h2>Załączniki i OCR</h2>
     <p>Załączniki Gmail, IMAP i Outlook są deduplikowane i szyfrowane AES-GCM. Locator IMAP zachowuje konto, folder, UIDVALIDITY, UID oraz część MIME, dlatego Worker nie pobiera ponownie całej wiadomości. Outlook korzysta z StoreID/EntryID i brokera STA; wymagany przez COM jawny plik roboczy jest usuwany przed zakończeniem pobrania. Worker obsługuje TXT/HTML/PDF/DOCX/XLSX/PPTX. OCR obrazów PNG/JPEG/TIFF/BMP i skanowanych stron PDF uruchamia lokalny Tesseract przez strumienie pamięci, bez jawnego pliku tymczasowego.</p>
-    <pre>run\KKR.MailLens.exe config --tesseract "C:\Program Files\Tesseract-OCR\tesseract.exe" --ocr-languages pol+eng --ocr-pdf-dpi 300 --ocr-max-pdf-pages 100 --worker-memory-mb 1536
+    <pre>run\KKR.MailLens.exe config --tesseract "C:\Program Files\Tesseract-OCR\tesseract.exe" --ocr-languages pol+eng --ocr-pdf-dpi 300 --ocr-max-pdf-pages 100 --ocr-pdf-batch-size 4 --worker-memory-mb 1536
 run\KKR.MailLens.exe rebuild-content-index</pre>
-    <p>Worker renderuje przez PDFium tylko strony bez użytecznej warstwy tekstowej, wykonuje OCR strona po stronie i scala wynik według numeru strony przed aktualizacją indeksu FTS5. Launcher <code>processing-run</code> tworzy proces jako wstrzymany, nakłada ograniczony token Windows, izolację interfejsu Job Object i limit pamięci, a dopiero potem go wznawia. Worker uruchomiony bez launchera odmawia pracy. Ctrl+C i zablokowanie sesji anulują aktywną operację i zwracają zadanie do kolejki.</p>
+    <p>Worker renderuje przez PDFium tylko strony bez użytecznej warstwy tekstowej, grupuje je w ograniczone batche (domyślnie po 4), zeruje wykorzystane bufory PNG i scala wynik według numeru strony przed aktualizacją indeksu FTS5. Launcher <code>processing-run</code> tworzy proces jako wstrzymany, nakłada ograniczony token Windows, izolację interfejsu Job Object i limit pamięci, a dopiero potem go wznawia. Worker uruchomiony bez launchera odmawia pracy. Ctrl+C i zablokowanie sesji anulują aktywną operację i zwracają zadanie do kolejki.</p>
   </section>
 
   <section>

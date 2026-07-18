@@ -59,6 +59,9 @@ static class Cli
         if (GetStr(args, "--ocr-pdf-render-timeout") is { } renderTimeout
             && int.TryParse(renderTimeout, out int renderSeconds))
         { cfg.OcrPdfRenderTimeoutSeconds = Math.Clamp(renderSeconds, 10, 3600); changed = true; }
+        if (GetStr(args, "--ocr-pdf-batch-size") is { } batchSize
+            && int.TryParse(batchSize, out int batchPages))
+        { cfg.OcrPdfBatchSize = Math.Clamp(batchPages, 1, 16); changed = true; }
         if (GetStr(args, "--worker-memory-mb") is { } workerMemory
             && int.TryParse(workerMemory, out int memoryMb))
         { cfg.WorkerMemoryLimitMb = Math.Clamp(memoryMb, 256, 16_384); changed = true; }
@@ -79,12 +82,12 @@ static class Cli
         Console.WriteLine($"max/folder   : {cfg.MaxPerFolder}{(cfg.MaxPerFolder <= 0 ? "  (bez limitu)" : "")}");
         Console.WriteLine($"Tesseract    : {cfg.TesseractPath}");
         Console.WriteLine($"OCR          : {cfg.OcrLanguages}, timeout {cfg.OcrTimeoutSeconds} s");
-        Console.WriteLine($"OCR PDF      : {cfg.OcrPdfDpi} DPI, max {cfg.OcrMaxPdfPages} stron, render timeout {cfg.OcrPdfRenderTimeoutSeconds} s/strona");
+        Console.WriteLine($"OCR PDF      : {cfg.OcrPdfDpi} DPI, max {cfg.OcrMaxPdfPages} stron, batch {cfg.OcrPdfBatchSize}, render timeout {cfg.OcrPdfRenderTimeoutSeconds} s/batch");
         Console.WriteLine($"Worker       : limit pamięci {cfg.WorkerMemoryLimitMb} MiB");
         Console.WriteLine($"FFmpeg       : {cfg.FfmpegPath}, timeout {cfg.FfmpegTimeoutSeconds} s");
         Console.WriteLine($"whisper.cpp  : {cfg.WhisperPath}, model '{cfg.WhisperModelPath}', język {cfg.WhisperLanguage}, timeout {cfg.WhisperTimeoutSeconds} s");
         Console.WriteLine($"Transkrypcja : max {cfg.TranscriptionMaxMinutes} min");
-        if (!changed) Console.WriteLine("Zmiana: config [--store <fragment>] [--max N] [--tesseract <sciezka>] [--ocr-languages pol+eng] [--ocr-timeout N] [--ocr-pdf-dpi N] [--ocr-max-pdf-pages N] [--ocr-pdf-render-timeout N] [--worker-memory-mb N] [--ffmpeg <sciezka>] [--whisper <sciezka>] [--whisper-model <plik>] [--whisper-language auto] [--ffmpeg-timeout N] [--whisper-timeout N] [--transcription-max-minutes N]");
+        if (!changed) Console.WriteLine("Zmiana: config [--store <fragment>] [--max N] [--tesseract <sciezka>] [--ocr-languages pol+eng] [--ocr-timeout N] [--ocr-pdf-dpi N] [--ocr-max-pdf-pages N] [--ocr-pdf-render-timeout N] [--ocr-pdf-batch-size N] [--worker-memory-mb N] [--ffmpeg <sciezka>] [--whisper <sciezka>] [--whisper-model <plik>] [--whisper-language auto] [--ffmpeg-timeout N] [--whisper-timeout N] [--transcription-max-minutes N]");
         return 0;
     }
 
@@ -560,7 +563,7 @@ static class Cli
               lock                                 zablokuj sesje GUI (usun klucz z RAM)
               config [--store <fragm>] [--max <N>] [--tesseract <sciezka>] [--ocr-languages pol+eng]
                      [--ocr-timeout N] [--ocr-pdf-dpi N] [--ocr-max-pdf-pages N]
-                     [--ocr-pdf-render-timeout N] [--worker-memory-mb N]
+                     [--ocr-pdf-render-timeout N] [--ocr-pdf-batch-size N] [--worker-memory-mb N]
                      [--ffmpeg <sciezka>] [--whisper <sciezka>] [--whisper-model <plik>]
                      [--whisper-language auto] [--ffmpeg-timeout N] [--whisper-timeout N]
                      [--transcription-max-minutes N]

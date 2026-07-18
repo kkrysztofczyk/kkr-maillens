@@ -163,29 +163,38 @@ static class OcrAttachmentProcessor
                 $"Dokument wymaga OCR dla {pagesToOcr.Length} stron; limit wynosi {renderOptions.MaxPages}.");
 
         var ocrSegments = new List<SegmentDraft>(pagesToOcr.Length);
-        foreach (int pageNumber in pagesToOcr)
+        foreach (int[] batch in pagesToOcr.Chunk(renderOptions.BatchSize))
         {
             heartbeat?.Invoke();
             IReadOnlyList<RenderedPdfPage> rendered = await renderer.RenderAsync(detected.Content,
-                [pageNumber], renderOptions, cancellationToken).ConfigureAwait(false);
-            if (rendered.Count != 1 || rendered[0].PageNumber != pageNumber)
-            {
-                Zero(rendered);
-                throw new InvalidDataException($"Renderer PDF nie zwrócił strony {pageNumber}.");
-            }
-
-            byte[] png = rendered[0].PngBytes;
+                batch, renderOptions, cancellationToken).ConfigureAwait(false);
             try
             {
-                ExtractionResult pageResult = await engine.ExtractAsync(png, "image/png", cancellationToken)
-                    .ConfigureAwait(false);
-                if (pageResult.CleanText.Length > 0)
-                    ocrSegments.Add(new SegmentDraft(pageResult.RawText, PageNumber: pageNumber));
-                heartbeat?.Invoke();
+                if (rendered.Count != batch.Length
+                    || !rendered.Select(page => page.PageNumber).SequenceEqual(batch))
+                    throw new InvalidDataException(
+                        $"Renderer PDF nie zwrócił oczekiwanego batcha stron: {string.Join(',', batch)}.");
+
+                foreach (RenderedPdfPage page in rendered)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    try
+                    {
+                        ExtractionResult pageResult = await engine.ExtractAsync(
+                            page.PngBytes, "image/png", cancellationToken).ConfigureAwait(false);
+                        if (pageResult.CleanText.Length > 0)
+                            ocrSegments.Add(new SegmentDraft(pageResult.RawText, PageNumber: page.PageNumber));
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(page.PngBytes);
+                    }
+                    heartbeat?.Invoke();
+                }
             }
             finally
             {
-                CryptographicOperations.ZeroMemory(png);
+                Zero(rendered);
             }
         }
 

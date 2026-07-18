@@ -31,6 +31,7 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Zapis strony Gmail obejmuje jedną transakcją wiadomości, korpus/FTS, metadane załączników i enqueue.
 - Zadanie `download` powstaje wyłącznie dla załącznika w stanie `metadata-only`; ponowny upsert nie przetwarza gotowej treści.
 - Puste wyniki OCR strony lub obrazu kończą dokument poprawnie, zachowując pozostałe segmenty zamiast oznaczać całość jako `failed`.
+- Strony PDF wymagające OCR są renderowane w konfigurowalnych batchach; kolejność jest walidowana, heartbeat działa po każdej stronie, a wszystkie bufory PNG są zerowane także przy błędzie.
 - OpenXML ma limity liczby wpisów, rozmiaru po rozwinięciu i współczynnika kompresji oraz odrzuca niebezpieczne ścieżki archiwum.
 - Nieobsługiwane typy kończą się statusem `skipped`, bez trzech bezcelowych prób i szumu w `failed`.
 - Testy regresyjne obejmują przekroczenie limitu PDF i ekspansji archiwum OpenXML.
@@ -45,9 +46,8 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Wyszukiwanie GUI przełącza się między wiadomościami, `content_fts` albo łączy oba rodzaje wyników.
 - IMAP zapisuje locator konto/folder/UIDVALIDITY/UID/część MIME, a Worker pobiera i przetwarza załącznik przez MailKit z limitem pamięci.
 - Outlook zapisuje StoreID/EntryID/indeks załącznika; broker COM działa na dedykowanym STA i sprząta izolowany plaintext workspace.
-- Zestaw testów wzrósł z historycznych 20/31 do 84 testów.
+- Zestaw testów wzrósł z historycznych 20/31 do 85 testów.
 
 ### Otwarte — roadmapa
 
-- Renderowanie stron PDF do OCR w batchach (dziś każdy `RenderAsync` parsuje dokument od nowa).
 - Opcjonalne lokalne AI i wyszukiwanie semantyczne.

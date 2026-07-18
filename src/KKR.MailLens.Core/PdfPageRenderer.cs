@@ -6,7 +6,8 @@ namespace KKR.MailLens;
 sealed record PdfRenderOptions(
     int Dpi = 300,
     int MaxPages = 100,
-    TimeSpan? Timeout = null)
+    TimeSpan? Timeout = null,
+    int BatchSize = 4)
 {
     public TimeSpan EffectiveTimeout => Timeout ?? TimeSpan.FromMinutes(10);
 
@@ -14,6 +15,7 @@ sealed record PdfRenderOptions(
     {
         if (Dpi is < 72 or > 600) throw new ArgumentOutOfRangeException(nameof(Dpi));
         if (MaxPages is < 1 or > 10_000) throw new ArgumentOutOfRangeException(nameof(MaxPages));
+        if (BatchSize is < 1 or > 16) throw new ArgumentOutOfRangeException(nameof(BatchSize));
         if (EffectiveTimeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(Timeout));
     }
 }

@@ -89,13 +89,13 @@ OCR obrazów PNG/JPEG/TIFF/BMP oraz skanowanych stron PDF korzysta z lokalnego T
 Domyślne języki to `pol+eng`, rozdzielczość PDF to 300 DPI, a limit jednego dokumentu wynosi 100 stron wymagających OCR. Ścieżkę, języki, timeouty i limity można ustawić poleceniem:
 
 ```powershell
-run\KKR.MailLens.exe config --tesseract "C:\Program Files\Tesseract-OCR\tesseract.exe" --ocr-languages pol+eng --ocr-timeout 120 --ocr-pdf-dpi 300 --ocr-max-pdf-pages 100 --ocr-pdf-render-timeout 120 --worker-memory-mb 1536
+run\KKR.MailLens.exe config --tesseract "C:\Program Files\Tesseract-OCR\tesseract.exe" --ocr-languages pol+eng --ocr-timeout 120 --ocr-pdf-dpi 300 --ocr-max-pdf-pages 100 --ocr-pdf-render-timeout 120 --ocr-pdf-batch-size 4 --worker-memory-mb 1536
 run\KKR.MailLens.exe processing-run
 run\KKR.MailLens.exe query-content "neutralny tekst"
 run\KKR.MailLens.exe rebuild-content-index
 ```
 
-PDF bez użytecznej warstwy tekstowej na co najmniej jednej stronie otrzymuje status `needs-ocr`, po czym Worker automatycznie zleca OCR tych stron. Segmenty tekstowe i OCR są scalane według numeru strony i indeksowane w FTS5. Podczas długiego OCR Worker odnawia dzierżawę zadania po każdej stronie.
+PDF bez użytecznej warstwy tekstowej na co najmniej jednej stronie otrzymuje status `needs-ocr`, po czym Worker automatycznie zleca OCR tych stron. PDF jest otwierany raz na mały, konfigurowalny batch stron (domyślnie 4), a każdy bufor PNG jest zerowany natychmiast po OCR. Segmenty tekstowe i OCR są scalane według numeru strony i indeksowane w FTS5. Podczas długiego OCR Worker odnawia dzierżawę zadania po każdej stronie.
 
 `processing-run` uruchamia Workera z ograniczonym tokenem Windows, na nieinteraktywnym pulpicie i w Job Object z blokadą dostępu do schowka, ustawień interfejsu oraz globalnych uchwytów. Konfigurowalny łączny limit pamięci obejmuje także procesy potomne. Proces jest tworzony jako wstrzymany, ograniczenia są nakładane przed wykonaniem pierwszej instrukcji, a bezpośrednio uruchomiony `KKR.MailLens.Worker.exe` odmawia pracy. Ctrl+C i zablokowanie sesji anulują aktywne operacje Gmail/Tesseract/PDF; zadanie wraca do kolejki bez zużycia próby.
 
