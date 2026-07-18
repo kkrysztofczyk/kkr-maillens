@@ -9,7 +9,18 @@ namespace KKR.MailLens;
 /// </summary>
 static class Setup
 {
-    public static bool IsInitialized => File.Exists(Paths.CorpusDb) && Mode.Read().Length > 0;
+    static CorpusInstallFiles InstallFiles => new(
+        Paths.CorpusDb, Paths.SaltFile, Paths.ModeFile, Paths.InstallJournalFile);
+
+    public static bool IsInitialized
+    {
+        get
+        {
+            try { CorpusInstallation.Recover(InstallFiles); }
+            catch { return false; }
+            return File.Exists(Paths.CorpusDb) && File.Exists(Paths.SaltFile) && Mode.Read().Length > 0;
+        }
+    }
 
     public sealed record Result(string? Error, string? KeyHex);
 
@@ -18,6 +29,8 @@ static class Setup
     public static Result Init(string pin, bool wantYubi, bool force)
     {
         if (string.IsNullOrEmpty(pin)) return new("Pusty PIN.", null);
+        try { CorpusInstallation.Recover(InstallFiles); }
+        catch (Exception ex) { return new("Nie mogę odtworzyć przerwanej inicjalizacji: " + ex.Message, null); }
         // Chron ISTNIEJACY plik bazy, nie tylko "w pelni zainicjowany" (mode.txt moze zniknac, a dane sa).
         if ((IsInitialized || File.Exists(Paths.CorpusDb)) && !force)
             return new("Korpus juz istnieje. Uzyj force, ale to SKASUJE dotychczasowe dane.", null);
@@ -50,28 +63,25 @@ static class Setup
             return new("Nie moge utworzyc zaszyfrowanej bazy: " + ex.Message, null);
         }
 
-        // 3) Commit: dopiero teraz utrwalamy sol, podmieniamy baze i zapisujemy tryb.
+        // 3) Commit: baza, sól i tryb są podmieniane odwracalnie; dziennik pozwala
+        //    przywrócić stary zestaw także po przerwaniu procesu.
         try
         {
             Session.Lock(); // sprzataj ewentualna stara sesje dyskowa
-            if (force) PurgeDataBoundToPreviousCorpus();
-            Crypto.WriteSalt(salt);
-            if (File.Exists(Paths.CorpusDb)) File.Delete(Paths.CorpusDb);
-            File.Move(tmp, Paths.CorpusDb);
-            Mode.Write(wantYubi ? "pin+yubi" : "pin");
+            SqliteConnection.ClearAllPools();
+            CorpusInstallation.Commit(InstallFiles, tmp, salt, wantYubi ? "pin+yubi" : "pin");
         }
         catch (Exception ex)
         {
             try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
             return new("Nie moge zapisac nowego korpusu: " + ex.Message, null);
         }
+        if (force) PurgeDataBoundToPreviousCorpus();
         return new(null, keyHex);
     }
 
     static void PurgeDataBoundToPreviousCorpus()
     {
-        DeleteFileIfExists(Paths.CorpusDb + "-wal");
-        DeleteFileIfExists(Paths.CorpusDb + "-shm");
         DeleteFileIfExists(Paths.ImapAccountsFile);
         DeleteFileIfExists(Paths.GmailCancelFile);
         DeleteDirectoryIfExists(Paths.GmailTokensDir);
@@ -81,11 +91,11 @@ static class Setup
 
     static void DeleteFileIfExists(string path)
     {
-        if (File.Exists(path)) File.Delete(path);
+        try { if (File.Exists(path)) File.Delete(path); } catch { }
     }
 
     static void DeleteDirectoryIfExists(string path)
     {
-        if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+        try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); } catch { }
     }
 }

@@ -14,6 +14,7 @@ static class Paths
     public static string SessionKey => Path.Combine(Base, "session.key"); // DPAPI({klucz, wygasa})
     public static string SaltFile => Path.Combine(Base, "salt.bin");     // sol PBKDF2 (nietajna); tez wyzwanie YubiKey
     public static string ModeFile => Path.Combine(Base, "mode.txt");     // "pin" | "pin+yubi" (sticky po opt-in --yubi)
+    public static string InstallJournalFile => Path.Combine(Base, "corpus-install.pending");
     public static string NoiseRulesFile => Path.Combine(Base, "noise-rules.json"); // jawne reguly szumu (mail vs alert)
     public static string ImapAccountsFile => Path.Combine(Base, "imap-accounts.json"); // konta IMAP (haslo: sesja + DPAPI)
     public static string ConfigFile => Path.Combine(Base, "config.json"); // konfiguracja harvestu (store filter, limit)

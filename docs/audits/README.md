@@ -28,6 +28,7 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Ochrona przed path traversal blobów ma test regresyjny.
 - Tokeny Gmail i hasła IMAP są związane z kluczem aktywnej sesji przez AES-GCM, a następnie chronione przez DPAPI `CurrentUser`.
 - Starsze poświadczenia DPAPI-only są migrowane po odblokowaniu; ponowna inicjalizacja usuwa sekrety i bloby poprzedniego korpusu.
+- Ponowna inicjalizacja podmienia bazę, sól, tryb oraz sidecary SQLite przez dziennikowaną transakcję plikową; błąd odtwarza cały poprzedni zestaw, a stary blob store i poświadczenia są usuwane dopiero po commit.
 - Zapis strony Gmail obejmuje jedną transakcją wiadomości, korpus/FTS, metadane załączników i enqueue.
 - Zadanie `download` powstaje wyłącznie dla załącznika w stanie `metadata-only`; ponowny upsert nie przetwarza gotowej treści.
 - Walidacja rozmiaru Gmail nadal egzekwuje twardy limit pobrania, ale toleruje niewielką różnicę metadanych i odrzuca dopiero istotny rozjazd.
