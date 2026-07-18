@@ -9,7 +9,9 @@ sealed record StoredBlob(long Id, string Sha256, string EncryptedPath, long Orig
 sealed class EncryptedBlobStore
 {
     static readonly byte[] Magic = "KKRMLB01"u8.ToArray();
-    const byte Version = 1;
+    const byte LegacyVersion = 1;
+    const byte CurrentVersion = 2;
+    static readonly byte[] CurrentAad = [.. Magic, CurrentVersion];
     const int NonceSize = 12;
     const int TagSize = 16;
     readonly string _root;
@@ -41,7 +43,7 @@ sealed class EncryptedBlobStore
         try
         {
             File.WriteAllBytes(temporary, encrypted);
-            if (!File.Exists(destination)) File.Move(temporary, destination);
+            MoveIntoPlace(temporary, destination);
         }
         finally
         {
@@ -59,10 +61,10 @@ sealed class EncryptedBlobStore
         command.Parameters.AddWithValue("$hash", hash);
         command.Parameters.AddWithValue("$path", relative.Replace('\\', '/'));
         command.Parameters.AddWithValue("$size", plaintext.Length);
-        command.Parameters.AddWithValue("$version", Version);
+        command.Parameters.AddWithValue("$version", CurrentVersion);
         command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
         long id = Convert.ToInt64(command.ExecuteScalar());
-        return new StoredBlob(id, hash, relative.Replace('\\', '/'), plaintext.Length, Version);
+        return new StoredBlob(id, hash, relative.Replace('\\', '/'), plaintext.Length, CurrentVersion);
     }
 
     public byte[] Read(StoredBlob blob)
@@ -70,6 +72,8 @@ sealed class EncryptedBlobStore
         byte[] encrypted = File.ReadAllBytes(Absolute(blob.EncryptedPath));
         try
         {
+            if (encrypted.Length <= Magic.Length || encrypted[Magic.Length] != blob.EncryptionVersion)
+                throw new InvalidDataException("Wersja blobu nie zgadza się z metadanymi.");
             byte[] plaintext = Decrypt(encrypted);
             string actual = Convert.ToHexString(SHA256.HashData(plaintext)).ToLowerInvariant();
             if (!CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(actual), Encoding.ASCII.GetBytes(blob.Sha256)))
@@ -107,9 +111,10 @@ sealed class EncryptedBlobStore
         byte[] nonce = RandomNumberGenerator.GetBytes(NonceSize);
         byte[] ciphertext = new byte[plaintext.Length];
         byte[] tag = new byte[TagSize];
-        using (var aes = new AesGcm(_key, TagSize)) aes.Encrypt(nonce, plaintext, ciphertext, tag, Magic);
+        using (var aes = new AesGcm(_key, TagSize))
+            aes.Encrypt(nonce, plaintext, ciphertext, tag, CurrentAad);
         byte[] result = new byte[Magic.Length + 1 + NonceSize + TagSize + ciphertext.Length];
-        Magic.CopyTo(result, 0); result[Magic.Length] = Version;
+        Magic.CopyTo(result, 0); result[Magic.Length] = CurrentVersion;
         nonce.CopyTo(result, Magic.Length + 1);
         tag.CopyTo(result, Magic.Length + 1 + NonceSize);
         ciphertext.CopyTo(result, Magic.Length + 1 + NonceSize + TagSize);
@@ -120,13 +125,20 @@ sealed class EncryptedBlobStore
     byte[] Decrypt(ReadOnlySpan<byte> encrypted)
     {
         int header = Magic.Length + 1 + NonceSize + TagSize;
-        if (encrypted.Length <= header || !encrypted[..Magic.Length].SequenceEqual(Magic) || encrypted[Magic.Length] != Version)
+        if (encrypted.Length <= header || !encrypted[..Magic.Length].SequenceEqual(Magic))
             throw new InvalidDataException("Nieobsługiwany format zaszyfrowanego blobu.");
+        byte version = encrypted[Magic.Length];
+        ReadOnlySpan<byte> aad = version switch
+        {
+            LegacyVersion => Magic,
+            CurrentVersion => CurrentAad,
+            _ => throw new InvalidDataException("Nieobsługiwana wersja zaszyfrowanego blobu."),
+        };
         ReadOnlySpan<byte> nonce = encrypted.Slice(Magic.Length + 1, NonceSize);
         ReadOnlySpan<byte> tag = encrypted.Slice(Magic.Length + 1 + NonceSize, TagSize);
         ReadOnlySpan<byte> ciphertext = encrypted[header..];
         byte[] plaintext = new byte[ciphertext.Length];
-        try { using var aes = new AesGcm(_key, TagSize); aes.Decrypt(nonce, ciphertext, tag, plaintext, Magic); return plaintext; }
+        try { using var aes = new AesGcm(_key, TagSize); aes.Decrypt(nonce, ciphertext, tag, plaintext, aad); return plaintext; }
         catch { CryptographicOperations.ZeroMemory(plaintext); throw; }
     }
 
@@ -139,15 +151,12 @@ sealed class EncryptedBlobStore
         return full;
     }
 
-    static byte[] DeriveKey(byte[] inputKey, string context)
+    internal static void MoveIntoPlace(string temporary, string destination)
     {
-        byte[] salt = new byte[32];
-        byte[] prk;
-        using (var extract = new HMACSHA256(salt)) prk = extract.ComputeHash(inputKey);
-        byte[] info = Encoding.UTF8.GetBytes(context);
-        byte[] expandInput = new byte[info.Length + 1];
-        info.CopyTo(expandInput, 0); expandInput[^1] = 1;
-        try { using var expand = new HMACSHA256(prk); return expand.ComputeHash(expandInput); }
-        finally { CryptographicOperations.ZeroMemory(prk); CryptographicOperations.ZeroMemory(expandInput); }
+        try { File.Move(temporary, destination); }
+        catch (IOException) when (File.Exists(destination)) { }
     }
+
+    static byte[] DeriveKey(byte[] inputKey, string context) => HKDF.DeriveKey(
+        HashAlgorithmName.SHA256, inputKey, 32, salt: new byte[32], info: Encoding.UTF8.GetBytes(context));
 }

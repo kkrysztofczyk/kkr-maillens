@@ -22,13 +22,14 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Działa lokalny OCR obrazów i mieszanych PDF-ów strona po stronie.
 - Dokumentacja opisuje Gmail, Workera, kolejkę, ekstrakcję i OCR.
 - `Complete` i `Fail` stosują fencing po stanie `running` i identyfikatorze właściciela lease.
-- Zestaw testów wzrósł z historycznych 20/31 do 53 testów.
+- Blob store zapisuje atomowo przy równoległej deduplikacji i używa AAD v2 obejmującego wersję formatu.
+- Odczyt istniejących blobów v1 pozostaje zgodny wstecz, a KDF korzysta z systemowego `HKDF`.
+- Ochrona przed path traversal blobów ma test regresyjny.
+- Zestaw testów wzrósł z historycznych 20/31 do 57 testów.
 
 ### Otwarte — priorytet
 
 - Powiązać ochronę tokenów Gmail i haseł IMAP z odblokowaną sesją; obecnie podstawową ochroną jest DPAPI `CurrentUser`.
-- Usunąć wyścig `File.Exists`/`File.Move` podczas równoległego zapisu identycznego blobu.
-- Uwierzytelniać w AAD również wersję formatu blobu, nie tylko magic header.
 - Rozważyć jedną transakcję dla zapisu wiadomości, korpusu, metadanych załączników i enqueue strony synchronizacji.
 - Utwardzić Worker przetwarzający niezaufane dokumenty: limity zasobów i uprawnień oraz testy złośliwych PDF/OOXML.
 
@@ -36,6 +37,6 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 
 - Natychmiastowe anulowanie aktywnego zadania po zablokowaniu sesji.
 - Garbage collection zaszyfrowanych blobów bez referencji.
-- Testy fencing kolejki, path traversal, odbudowy FTS i współdzielonych blobów.
+- Testy odbudowy FTS i współdzielonych blobów.
 - Obsługa Gmaila i wyników `content_fts` w GUI.
 - Załączniki Outlook/IMAP, transkrypcja audio/wideo oraz opcjonalne lokalne AI.
