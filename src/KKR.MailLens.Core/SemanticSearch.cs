@@ -8,6 +8,7 @@ namespace KKR.MailLens;
 interface IEmbeddingProvider : IDisposable
 {
     string Model { get; }
+    /// <summary>Zwraca skończone wektory znormalizowane do długości jednostkowej (kontrakt dostawcy).</summary>
     Task<IReadOnlyList<float[]>> EmbedAsync(IReadOnlyList<string> inputs,
         CancellationToken cancellationToken = default);
 }
@@ -81,7 +82,8 @@ sealed class OllamaEmbeddingProvider : IEmbeddingProvider
             new EmbedRequest(Model, inputs, true), cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            string detail = Limit(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+            string detail = DiagnosticText.Limit(
+                await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
             throw new HttpRequestException(
                 $"Lokalny model embeddingów zwrócił HTTP {(int)response.StatusCode}: {detail}",
                 null, response.StatusCode);
@@ -102,34 +104,47 @@ sealed class OllamaEmbeddingProvider : IEmbeddingProvider
         {
             if (vector is null || vector.Length != dimensions)
                 throw new InvalidDataException("Lokalny model zwrócił embeddingi o różnych wymiarach.");
-            Normalize(vector);
+            VectorMath.Normalize(vector);
         }
         return payload.Embeddings;
     }
 
     public void Dispose() => client.Dispose();
 
-    static void Normalize(float[] vector)
+    sealed record EmbedRequest(string Model, IReadOnlyList<string> Input, bool Truncate);
+    sealed record EmbedResponse(float[][] Embeddings);
+}
+
+static class VectorMath
+{
+    public static void Normalize(float[] vector, string description = "Embedding")
+    {
+        float scale = (float)(1 / Math.Sqrt(NormSquared(vector, description)));
+        for (int index = 0; index < vector.Length; index++) vector[index] *= scale;
+    }
+
+    public static void Validate(float[] vector, string description = "Embedding")
+        => NormSquared(vector, description);
+
+    public static double Dot(float[] left, float[] right)
+    {
+        double result = 0;
+        for (int index = 0; index < left.Length; index++) result += left[index] * (double)right[index];
+        return result;
+    }
+
+    static double NormSquared(float[] vector, string description)
     {
         double normSquared = 0;
         foreach (float value in vector)
         {
-            if (!float.IsFinite(value)) throw new InvalidDataException("Embedding zawiera wartość niefinitywną.");
+            if (!float.IsFinite(value))
+                throw new InvalidDataException($"{description} zawiera wartość niefinitywną.");
             normSquared += value * (double)value;
         }
-        if (normSquared <= 0) throw new InvalidDataException("Embedding ma zerową normę.");
-        float scale = (float)(1 / Math.Sqrt(normSquared));
-        for (int index = 0; index < vector.Length; index++) vector[index] *= scale;
+        if (normSquared <= 0) throw new InvalidDataException($"{description} ma zerową normę.");
+        return normSquared;
     }
-
-    static string Limit(string value)
-    {
-        string oneLine = value.Replace('\r', ' ').Replace('\n', ' ').Trim();
-        return oneLine.Length <= 500 ? oneLine : oneLine[..500];
-    }
-
-    sealed record EmbedRequest(string Model, IReadOnlyList<string> Input, bool Truncate);
-    sealed record EmbedResponse(float[][] Embeddings);
 }
 
 sealed record SemanticIndexResult(int Indexed, int TotalForModel);
@@ -154,7 +169,8 @@ static class SemanticIndex
             IReadOnlyList<EmbeddingSource> sources = Pending(connection, provider.Model, batchSize, documentId);
             if (sources.Count == 0) break;
             IReadOnlyList<float[]> vectors = await provider.EmbedAsync(
-                sources.Select(source => LimitInput(source.Text)).ToArray(), cancellationToken).ConfigureAwait(false);
+                sources.Select(source => TextLimit.Take(source.Text, MaxInputCharacters)).ToArray(),
+                cancellationToken).ConfigureAwait(false);
             if (vectors.Count != sources.Count)
                 throw new InvalidDataException("Lokalny model zwrócił niepełny batch embeddingów.");
             Save(connection, provider.Model, sources, vectors);
@@ -206,7 +222,7 @@ static class SemanticIndex
         int dimensions = vectors[0].Length;
         if (vectors.Any(vector => vector.Length != dimensions))
             throw new InvalidDataException("Batch zawiera embeddingi o różnych wymiarach.");
-        foreach (float[] embedding in vectors) Normalize(embedding);
+        foreach (float[] embedding in vectors) VectorMath.Validate(embedding);
         int? existingDimensions = ModelDimensions(connection, model);
         if (existingDimensions is not null && existingDimensions != dimensions)
             throw new InvalidDataException(
@@ -258,32 +274,11 @@ static class SemanticIndex
         command.ExecuteNonQuery();
     }
 
-    static string LimitInput(string text)
-    {
-        if (text.Length <= MaxInputCharacters) return text;
-        int length = MaxInputCharacters;
-        if (char.IsHighSurrogate(text[length - 1])) length--;
-        return text[..length];
-    }
-
     static byte[] Serialize(float[] vector)
     {
         byte[] bytes = new byte[checked(vector.Length * sizeof(float))];
         Buffer.BlockCopy(vector, 0, bytes, 0, bytes.Length);
         return bytes;
-    }
-
-    static void Normalize(float[] vector)
-    {
-        double normSquared = 0;
-        foreach (float value in vector)
-        {
-            if (!float.IsFinite(value)) throw new InvalidDataException("Embedding zawiera wartość niefinitywną.");
-            normSquared += value * (double)value;
-        }
-        if (normSquared <= 0) throw new InvalidDataException("Embedding ma zerową normę.");
-        float scale = (float)(1 / Math.Sqrt(normSquared));
-        for (int index = 0; index < vector.Length; index++) vector[index] *= scale;
     }
 
     sealed record EmbeddingSource(long SegmentId, string Text);
@@ -306,7 +301,7 @@ static class SemanticSearch
         IReadOnlyList<float[]> queryVectors = await provider.EmbedAsync([query], cancellationToken)
             .ConfigureAwait(false);
         float[] queryVector = queryVectors.Single();
-        Normalize(queryVector);
+        VectorMath.Validate(queryVector, "Embedding zapytania");
         int indexed = SemanticIndex.Count(connection, provider.Model);
         int? indexedDimensions = SemanticIndex.ModelDimensions(connection, provider.Model);
         bool dimensionMismatch = indexedDimensions is not null && indexedDimensions.Value != queryVector.Length;
@@ -389,7 +384,7 @@ static class SemanticSearch
             byte[] bytes = (byte[])reader[12];
             if (bytes.Length != vectorBytes) continue;
             Buffer.BlockCopy(bytes, 0, vector, 0, vectorBytes);
-            (double Similarity, string Received) rank = (Dot(queryVector, vector), Text(reader, 1));
+            (double Similarity, string Received) rank = (VectorMath.Dot(queryVector, vector), Text(reader, 1));
             if (top.Count == topK && top.TryPeek(out _, out (double, string) weakest)
                 && ranking.Compare(rank, weakest) <= 0)
                 continue;
@@ -404,26 +399,6 @@ static class SemanticSearch
         var hits = new SemanticSearchHit[top.Count];
         for (int index = hits.Length - 1; index >= 0; index--) hits[index] = top.Dequeue();
         return new CandidateScan(hits, scanned);
-    }
-
-    static double Dot(float[] left, float[] right)
-    {
-        double result = 0;
-        for (int index = 0; index < left.Length; index++) result += left[index] * (double)right[index];
-        return result;
-    }
-
-    static void Normalize(float[] vector)
-    {
-        double normSquared = 0;
-        foreach (float value in vector)
-        {
-            if (!float.IsFinite(value)) throw new InvalidDataException("Embedding zapytania zawiera wartość niefinitywną.");
-            normSquared += value * (double)value;
-        }
-        if (normSquared <= 0) throw new InvalidDataException("Embedding zapytania ma zerową normę.");
-        float scale = (float)(1 / Math.Sqrt(normSquared));
-        for (int index = 0; index < vector.Length; index++) vector[index] *= scale;
     }
 
     static string Text(SqliteDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? "" : reader.GetString(ordinal);
