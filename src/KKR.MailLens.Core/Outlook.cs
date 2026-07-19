@@ -468,9 +468,11 @@ sealed class Outlook : IDisposable
     static string Str(Func<string> f) { try { return f() ?? ""; } catch { return ""; } }
     static int Int(Func<int> f, int fallback = 0) { try { return f(); } catch { return fallback; } }
     static bool Bool(Func<bool> f) { try { return f(); } catch { return false; } }
-    static string? DateStr(Func<object> f)
+    // Outlook COM zwraca czas lokalny; korpus przechowuje UTC (jak Gmail/IMAP) - jedna os czasu
+    // dla filtrow dat, ORDER BY received i okna kandydatow wyszukiwania semantycznego.
+    internal static string? DateStr(Func<object> f)
     {
-        try { var v = f(); return v is DateTime dt ? dt.ToString("yyyy-MM-dd HH:mm:ss") : null; }
+        try { var v = f(); return v is DateTime dt ? dt.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) : null; }
         catch { return null; }
     }
 

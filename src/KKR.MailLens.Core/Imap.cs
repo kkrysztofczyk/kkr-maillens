@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 using System.Text.Json;
 using MailKit;
@@ -113,6 +114,10 @@ static class Imap
             || a.HasFlag(FolderAttributes.NoSelect) || a.HasFlag(FolderAttributes.NonExistent);
     }
 
+    // Korpus przechowuje received/sent w UTC (jak Gmail/Outlook) - jedna os czasu dla filtrow i ORDER BY.
+    internal static string FormatReceivedUtc(DateTimeOffset? when) =>
+        when is { } w ? w.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) : "";
+
     static HarvestedMail MapSummary(IMessageSummary s, string acctName, IMailFolder f, string body, string storeId)
     {
         var env = s.Envelope;
@@ -142,8 +147,7 @@ static class Imap
                     StringComparison.OrdinalIgnoreCase)));
         }
 
-        var when = env?.Date ?? s.InternalDate;
-        string recv = when is { } w ? w.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss") : "";
+        string recv = FormatReceivedUtc(env?.Date ?? s.InternalDate);
         return new HarvestedMail
         {
             EntryId = sourceIdentity,
