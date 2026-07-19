@@ -65,6 +65,34 @@ public sealed class PaddleOcrTests
     }
 
     [TestMethod]
+    public async Task OcrPipeline_KeepsEmptyTesseractResultWhenPaddleFails()
+    {
+        using var db = new TestDatabase();
+        string directory = CreateDirectory();
+        try
+        {
+            string tesseract = WriteCommand(directory, "blank-tesseract.cmd", "more >nul");
+            // Adapter kończy się natychmiast bez odpowiedzi → fallback.ExtractAsync rzuca.
+            string paddle = WriteCommand(directory, "failing-python.cmd", "exit /b 9");
+            string runner = Path.Combine(directory, "runner.py");
+            File.WriteAllText(runner, "# neutral test adapter placeholder");
+            (long attachmentId, long documentId, EncryptedBlobStore store) = AddImage(db, directory);
+
+            await OcrAttachmentProcessor.ProcessAsync(db.Connection, store, attachmentId, documentId,
+                new TesseractOptions(tesseract, Timeout: TimeSpan.FromSeconds(5)), CancellationToken.None,
+                fallbackOptions: new PaddleOcrOptions(paddle, runner, Timeout: TimeSpan.FromSeconds(5)));
+
+            Assert.AreEqual("completed", db.ScalarText("SELECT status FROM content_documents;"));
+            Assert.AreEqual("tesseract", db.ScalarText("SELECT extractor_name FROM content_documents;"));
+            Assert.AreEqual(0, db.ScalarLong("SELECT count(*) FROM content_segments;"));
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch { }
+        }
+    }
+
+    [TestMethod]
     public async Task Engine_RejectsInvalidAdapterJson()
     {
         string directory = CreateDirectory();

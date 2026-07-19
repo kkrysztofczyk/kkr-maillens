@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Data.Sqlite;
 
 namespace KKR.MailLens;
@@ -83,6 +84,10 @@ sealed class TesseractOcrEngine
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            // Tesseract pisze tekst w UTF-8; domyślne dekodowanie w kodowaniu ANSI
+            // zamieniałoby polskie znaki na mojibake.
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
         };
         if (Path.GetExtension(options.ExecutablePath).Equals(".cmd", StringComparison.OrdinalIgnoreCase)
             || Path.GetExtension(options.ExecutablePath).Equals(".bat", StringComparison.OrdinalIgnoreCase))
@@ -241,8 +246,23 @@ static class OcrAttachmentProcessor
         if (primaryResult.CleanText.Length > 0 || fallback is null)
             return new OcrRun(primaryResult, false);
 
-        ExtractionResult fallbackResult = await fallback.ExtractAsync(image, mimeType, cancellationToken)
-            .ConfigureAwait(false);
+        ExtractionResult fallbackResult;
+        try
+        {
+            fallbackResult = await fallback.ExtractAsync(image, mimeType, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Fallback jest opcjonalnym ulepszeniem — jego awaria nie może unieważnić
+            // poprawnie zakończonego (pustego) wyniku Tesseracta.
+            Trace.TraceWarning("PaddleOCR fallback nie powiódł się; zachowano wynik Tesseracta: {0}", ex.Message);
+            return new OcrRun(primaryResult, false);
+        }
         return fallbackResult.CleanText.Length == 0
             ? new OcrRun(primaryResult, false)
             : new OcrRun(fallbackResult, true);

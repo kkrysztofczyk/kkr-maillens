@@ -119,6 +119,32 @@ public sealed class TesseractOcrTests
         }
     }
 
+    [TestMethod]
+    public async Task Engine_PreservesUtf8TextWithPolishCharacters()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "kkr-maillens-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            const string text = "Zażółć gęślą jaźń — ćma";
+            string payload = Path.Combine(directory, "payload.txt");
+            File.WriteAllText(payload, text, new System.Text.UTF8Encoding(false));
+            string executable = Path.Combine(directory, "utf8-tesseract.cmd");
+            File.WriteAllText(executable, $"@echo off\r\nmore >nul\r\ntype \"{payload}\"\r\n");
+            var engine = new TesseractOcrEngine(new TesseractOptions(
+                executable, "pol+eng", TimeSpan.FromSeconds(5)));
+
+            ExtractionResult result = await engine.ExtractAsync(
+                [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], "image/png");
+
+            StringAssert.Contains(result.RawText, text);
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch { }
+        }
+    }
+
     static string CreateFakeTesseract(string directory, bool delay)
     {
         string path = Path.Combine(directory, delay ? "slow-tesseract.cmd" : "fake-tesseract.cmd");
