@@ -208,9 +208,16 @@ static async Task DownloadAsync(Microsoft.Data.Sqlite.SqliteConnection connectio
     try
     {
         Checkpoint(cancellationToken, heartbeat);
-        StoredBlob blob = store.Put(connection, downloaded.Bytes);
-        Checkpoint(cancellationToken, heartbeat);
-        MailAttachmentRepository.MarkDownloaded(connection, item.Id, blob, downloaded.DetectedMimeType);
+        // Zapis blobu i przypięcie go do załącznika w jednej transakcji: blob bez referencji
+        // nie może być widoczny dla współbieżnego GC z innego procesu.
+        StoredBlob blob;
+        using (SqliteTransaction transaction = connection.BeginTransaction(deferred: false))
+        {
+            blob = store.Put(connection, downloaded.Bytes, transaction);
+            MailAttachmentRepository.MarkDownloaded(connection, item.Id, blob, downloaded.DetectedMimeType,
+                transaction);
+            transaction.Commit();
+        }
         Checkpoint(cancellationToken, heartbeat);
         long documentId = ContentDocumentRepository.EnsureAttachmentDocument(
             connection, item.Id, blob.Sha256, downloaded.DetectedMimeType);

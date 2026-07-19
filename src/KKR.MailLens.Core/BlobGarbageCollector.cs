@@ -8,34 +8,40 @@ static class BlobGarbageCollector
 {
     sealed record Candidate(long Id, string Sha256, string EncryptedPath, long OriginalSize);
 
-    public static BlobGarbageCollectionResult Preview(SqliteConnection connection)
+    /// <summary>Bloby młodsze niż to okno nie są sprzątane: chroni świeże zapisy, które nie mają
+    /// jeszcze widocznej referencji (np. pobieranie w innym procesie).</summary>
+    static readonly TimeSpan DefaultSafetyWindow = TimeSpan.FromHours(1);
+
+    public static BlobGarbageCollectionResult Preview(SqliteConnection connection,
+        TimeSpan? safetyWindow = null)
     {
-        IReadOnlyList<Candidate> candidates = FindCandidates(connection, transaction: null);
+        IReadOnlyList<Candidate> candidates = FindCandidates(connection, transaction: null,
+            Threshold(safetyWindow));
         return new BlobGarbageCollectionResult(candidates.Count, 0,
             candidates.Sum(candidate => candidate.OriginalSize), 0);
     }
 
     public static BlobGarbageCollectionResult Collect(SqliteConnection connection, string root,
-        Action<string>? warning = null)
+        Action<string>? warning = null, TimeSpan? safetyWindow = null)
     {
-        IReadOnlyList<Candidate> candidates = FindCandidates(connection, transaction: null);
+        string threshold = Threshold(safetyWindow);
+        IReadOnlyList<Candidate> candidates = FindCandidates(connection, transaction: null, threshold);
         int deleted = 0;
         int failed = 0;
         long reclaimedBytes = 0;
 
         foreach (Candidate candidate in candidates)
         {
+            string path;
             try
             {
+                path = EncryptedBlobStore.ResolvePath(root, candidate.EncryptedPath);
                 using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
-                if (!IsCollectable(connection, transaction, candidate.Id))
+                if (!IsCollectable(connection, transaction, candidate.Id, threshold))
                 {
                     transaction.Commit();
                     continue;
                 }
-
-                string path = EncryptedBlobStore.ResolvePath(root, candidate.EncryptedPath);
-                if (File.Exists(path)) File.Delete(path);
 
                 DeleteObsoletePipelineState(connection, transaction, candidate.Id);
                 int rows = Execute(connection, transaction, """
@@ -50,27 +56,44 @@ static class BlobGarbageCollector
                     throw new InvalidOperationException("Blob odzyskał aktywną referencję podczas sprzątania.");
 
                 transaction.Commit();
-                deleted++;
-                reclaimedBytes += candidate.OriginalSize;
-                TryDeleteEmptyParents(root, path);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
                 or InvalidDataException or InvalidOperationException or SqliteException)
             {
                 failed++;
                 warning?.Invoke($"Nie usunięto osieroconego blobu {candidate.Sha256}: {ex.Message}");
+                continue;
+            }
+
+            // Plik znika dopiero po zatwierdzeniu usunięcia wiersza: osierocony plik jest
+            // odtwarzalny przy ponownym zapisie, wiszący wiersz bez pliku już nie.
+            deleted++;
+            reclaimedBytes += candidate.OriginalSize;
+            try
+            {
+                if (File.Exists(path)) File.Delete(path);
+                TryDeleteEmptyParents(root, path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                warning?.Invoke($"Usunięto wpis blobu {candidate.Sha256}, ale plik pozostał: {ex.Message}");
             }
         }
 
         return new BlobGarbageCollectionResult(candidates.Count, deleted, reclaimedBytes, failed);
     }
 
-    static IReadOnlyList<Candidate> FindCandidates(SqliteConnection connection, SqliteTransaction? transaction)
+    static string Threshold(TimeSpan? safetyWindow) =>
+        (DateTimeOffset.UtcNow - (safetyWindow ?? DefaultSafetyWindow)).ToString("O");
+
+    static IReadOnlyList<Candidate> FindCandidates(SqliteConnection connection, SqliteTransaction? transaction,
+        string threshold)
     {
         using SqliteCommand command = Command(connection, transaction, """
             SELECT b.id,b.sha256,b.encrypted_path,b.original_size
             FROM stored_blobs b
-            WHERE NOT EXISTS(
+            WHERE b.created_at<=$threshold
+              AND NOT EXISTS(
                     SELECT 1 FROM mail_attachments a
                     WHERE a.blob_id=b.id AND a.is_deleted=0
                 )
@@ -82,7 +105,7 @@ static class BlobGarbageCollector
                     WHERE a.blob_id=b.id AND j.status='running'
                 )
             ORDER BY b.id;
-            """);
+            """, ("$threshold", threshold));
         var candidates = new List<Candidate>();
         using SqliteDataReader reader = command.ExecuteReader();
         while (reader.Read())
@@ -90,10 +113,15 @@ static class BlobGarbageCollector
         return candidates;
     }
 
-    static bool IsCollectable(SqliteConnection connection, SqliteTransaction transaction, long blobId)
+    static bool IsCollectable(SqliteConnection connection, SqliteTransaction transaction, long blobId,
+        string threshold)
     {
         using SqliteCommand command = Command(connection, transaction, """
-            SELECT NOT EXISTS(
+            SELECT EXISTS(
+                    SELECT 1 FROM stored_blobs
+                    WHERE id=$id AND created_at<=$threshold
+                )
+                AND NOT EXISTS(
                     SELECT 1 FROM mail_attachments
                     WHERE blob_id=$id AND is_deleted=0
                 )
@@ -104,7 +132,7 @@ static class BlobGarbageCollector
                     JOIN mail_attachments a ON a.id=COALESCE(j.attachment_id,d.attachment_id)
                     WHERE a.blob_id=$id AND j.status='running'
                 );
-            """, ("$id", blobId));
+            """, ("$id", blobId), ("$threshold", threshold));
         return Convert.ToInt64(command.ExecuteScalar()) == 1;
     }
 

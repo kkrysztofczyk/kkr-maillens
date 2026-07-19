@@ -47,6 +47,9 @@ public sealed class ImapAttachmentTests
         using (var command = db.Connection.CreateCommand())
         {
             command.CommandText = """
+                INSERT INTO stored_blobs(id,sha256,encrypted_path,original_size,encryption_version,created_at)
+                VALUES(9,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                    'aa/bb/record.blob',1,2,'2026-01-01T00:00:00Z');
                 UPDATE mail_attachments SET download_status='downloaded',processing_status='extracted',blob_id=9;
                 UPDATE processing_jobs SET status='completed',completed_at='2026-01-01T00:00:00Z';
                 """;

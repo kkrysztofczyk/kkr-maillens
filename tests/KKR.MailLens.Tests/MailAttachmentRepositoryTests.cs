@@ -18,6 +18,9 @@ public sealed class MailAttachmentRepositoryTests
         using (var processed = db.Connection.CreateCommand())
         {
             processed.CommandText = """
+                INSERT INTO stored_blobs(id,sha256,encrypted_path,original_size,encryption_version,created_at)
+                VALUES(9,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                    'aa/bb/record.blob',1,2,'2026-01-01T00:00:00Z');
                 UPDATE mail_attachments SET download_status='downloaded', processing_status='indexed',
                     blob_id=9, error_code='retained', error_message='retained';
                 UPDATE processing_jobs SET status='completed',completed_at='2026-01-01T00:00:00Z';

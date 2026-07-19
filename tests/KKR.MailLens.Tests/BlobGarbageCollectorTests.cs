@@ -22,14 +22,16 @@ public sealed class BlobGarbageCollectorTests
             string path = Path.Combine(root, blob.EncryptedPath.Replace('/', Path.DirectorySeparatorChar));
 
             DeleteMail(db, firstMail);
-            BlobGarbageCollectionResult retained = BlobGarbageCollector.Collect(db.Connection, root);
+            BlobGarbageCollectionResult retained = BlobGarbageCollector.Collect(db.Connection, root,
+                safetyWindow: TimeSpan.Zero);
 
             Assert.AreEqual(0, retained.Orphaned);
             Assert.IsTrue(File.Exists(path));
             Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM stored_blobs;"));
 
             DeleteMail(db, secondMail);
-            BlobGarbageCollectionResult collected = BlobGarbageCollector.Collect(db.Connection, root);
+            BlobGarbageCollectionResult collected = BlobGarbageCollector.Collect(db.Connection, root,
+                safetyWindow: TimeSpan.Zero);
 
             Assert.AreEqual(1, collected.Orphaned);
             Assert.AreEqual(1, collected.Deleted);
@@ -59,7 +61,8 @@ public sealed class BlobGarbageCollectorTests
                 "plain-text", "1");
             SetAttachmentDeleted(db, attachmentId);
 
-            BlobGarbageCollectionResult result = BlobGarbageCollector.Collect(db.Connection, root);
+            BlobGarbageCollectionResult result = BlobGarbageCollector.Collect(db.Connection, root,
+                safetyWindow: TimeSpan.Zero);
 
             Assert.AreEqual(1, result.Deleted);
             Assert.AreEqual(0, db.ScalarLong("SELECT count(*) FROM content_documents;"));
@@ -92,12 +95,112 @@ public sealed class BlobGarbageCollectorTests
                 command.ExecuteNonQuery();
             }
 
-            BlobGarbageCollectionResult preview = BlobGarbageCollector.Preview(db.Connection);
+            BlobGarbageCollectionResult preview = BlobGarbageCollector.Preview(db.Connection,
+                safetyWindow: TimeSpan.Zero);
 
             Assert.AreEqual(0, preview.Orphaned);
             Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM stored_blobs;"));
         }
         finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
+
+    [TestMethod]
+    public void Collect_LeavesFreshUnreferencedBlobUntilDownloadAttachesIt()
+    {
+        using var db = new TestDatabase();
+        string root = TemporaryRoot();
+        try
+        {
+            GmailAccountRecord account = db.AddAccount();
+            (long attachmentId, _) = AddAttachment(db, account, "message-race", "attachment-race");
+            var store = new EncryptedBlobStore(root, new string('A', 64));
+            StoredBlob blob = store.Put(db.Connection, "Neutralny tekst pobierania w toku"u8);
+            string path = Path.Combine(root, blob.EncryptedPath.Replace('/', Path.DirectorySeparatorChar));
+
+            BlobGarbageCollectionResult result = BlobGarbageCollector.Collect(db.Connection, root);
+
+            Assert.AreEqual(0, result.Orphaned);
+            Assert.AreEqual(0, result.Deleted);
+            Assert.IsTrue(File.Exists(path));
+            Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM stored_blobs;"));
+
+            MailAttachmentRepository.MarkDownloaded(db.Connection, attachmentId, blob, "text/plain");
+
+            Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM mail_attachments WHERE blob_id IS NOT NULL;"));
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
+
+    [TestMethod]
+    public void Collect_KeepsFileWhenBlobRowDeleteFails()
+    {
+        using var db = new TestDatabase();
+        string root = TemporaryRoot();
+        try
+        {
+            GmailAccountRecord account = db.AddAccount();
+            (long attachmentId, string mail) = AddAttachment(db, account, "message-order", "attachment-order");
+            var store = new EncryptedBlobStore(root, new string('A', 64));
+            StoredBlob blob = store.Put(db.Connection, "Neutralny tekst kolejności usuwania"u8);
+            MailAttachmentRepository.MarkDownloaded(db.Connection, attachmentId, blob, "text/plain");
+            string path = Path.Combine(root, blob.EncryptedPath.Replace('/', Path.DirectorySeparatorChar));
+            DeleteMail(db, mail);
+            Execute(db, """
+                CREATE TRIGGER test_block_blob_delete BEFORE DELETE ON stored_blobs
+                BEGIN SELECT RAISE(ABORT,'blokada testowa'); END;
+                """);
+            var warnings = new List<string>();
+
+            BlobGarbageCollectionResult blocked = BlobGarbageCollector.Collect(db.Connection, root,
+                warnings.Add, safetyWindow: TimeSpan.Zero);
+
+            Assert.AreEqual(1, blocked.Orphaned);
+            Assert.AreEqual(0, blocked.Deleted);
+            Assert.AreEqual(1, blocked.Failed);
+            Assert.AreEqual(1, warnings.Count);
+            Assert.IsTrue(File.Exists(path));
+            Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM stored_blobs;"));
+
+            Execute(db, "DROP TRIGGER test_block_blob_delete;");
+            BlobGarbageCollectionResult collected = BlobGarbageCollector.Collect(db.Connection, root,
+                warnings.Add, safetyWindow: TimeSpan.Zero);
+
+            Assert.AreEqual(1, collected.Deleted);
+            Assert.IsFalse(File.Exists(path));
+            Assert.AreEqual(0, db.ScalarLong("SELECT count(*) FROM stored_blobs;"));
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
+
+    [TestMethod]
+    public void BlobIntegrityTriggers_FailLoudlyOnDanglingReferenceAndGuardedDelete()
+    {
+        using var db = new TestDatabase();
+        string root = TemporaryRoot();
+        try
+        {
+            GmailAccountRecord account = db.AddAccount();
+            (long attachmentId, _) = AddAttachment(db, account, "message-fk", "attachment-fk");
+            var dangling = new StoredBlob(12_345, new string('a', 64), "aa/bb/missing.blob", 10, 2);
+
+            Assert.Throws<Microsoft.Data.Sqlite.SqliteException>(() =>
+                MailAttachmentRepository.MarkDownloaded(db.Connection, attachmentId, dangling, "text/plain"));
+
+            var store = new EncryptedBlobStore(root, new string('A', 64));
+            StoredBlob blob = store.Put(db.Connection, "Neutralny tekst integralności"u8);
+            MailAttachmentRepository.MarkDownloaded(db.Connection, attachmentId, blob, "text/plain");
+
+            Assert.Throws<Microsoft.Data.Sqlite.SqliteException>(() =>
+                Execute(db, "DELETE FROM stored_blobs;"));
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
+
+    static void Execute(TestDatabase db, string sql)
+    {
+        using var command = db.Connection.CreateCommand();
+        command.CommandText = sql;
+        command.ExecuteNonQuery();
     }
 
     static (long AttachmentId, string MailEntryId) AddAttachment(TestDatabase db, GmailAccountRecord account,

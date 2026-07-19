@@ -18,9 +18,10 @@ static class DatabaseMigrator
         new Migration009SemanticSearch(),
         new Migration010GmailSyncRetries(),
         new Migration011MailSourceIdentity(),
+        new Migration012MailAttachmentBlobIntegrity(),
     ];
 
-    public const int LatestVersion = 11;
+    public const int LatestVersion = 12;
 
     public static void Migrate(SqliteConnection connection)
     {

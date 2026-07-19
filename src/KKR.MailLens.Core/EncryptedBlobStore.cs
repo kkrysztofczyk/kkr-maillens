@@ -28,11 +28,12 @@ sealed class EncryptedBlobStore
         CryptographicOperations.ZeroMemory(sessionKey);
     }
 
-    public StoredBlob Put(SqliteConnection connection, ReadOnlySpan<byte> plaintext)
+    public StoredBlob Put(SqliteConnection connection, ReadOnlySpan<byte> plaintext,
+        SqliteTransaction? transaction = null)
     {
         if (plaintext.IsEmpty) throw new InvalidDataException("Nie można zapisać pustego blobu.");
         string hash = Convert.ToHexString(SHA256.HashData(plaintext)).ToLowerInvariant();
-        StoredBlob? existing = Find(connection, hash);
+        StoredBlob? existing = Find(connection, hash, transaction);
         if (existing is not null && File.Exists(Absolute(existing.EncryptedPath))) return existing;
 
         string relative = Path.Combine(hash[..2], hash.Substring(2, 2), hash + ".blob");
@@ -52,10 +53,12 @@ sealed class EncryptedBlobStore
         }
 
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO stored_blobs(sha256,encrypted_path,original_size,encryption_version,created_at)
             VALUES($hash,$path,$size,$version,$now)
-            ON CONFLICT(sha256) DO UPDATE SET encrypted_path=excluded.encrypted_path
+            ON CONFLICT(sha256) DO UPDATE SET encrypted_path=excluded.encrypted_path,
+                encryption_version=excluded.encryption_version
             RETURNING id;
             """;
         command.Parameters.AddWithValue("$hash", hash);
@@ -97,9 +100,10 @@ sealed class EncryptedBlobStore
             reader.GetInt64(3), reader.GetInt32(4));
     }
 
-    static StoredBlob? Find(SqliteConnection connection, string hash)
+    static StoredBlob? Find(SqliteConnection connection, string hash, SqliteTransaction? transaction)
     {
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "SELECT id,sha256,encrypted_path,original_size,encryption_version FROM stored_blobs WHERE sha256=$hash;";
         command.Parameters.AddWithValue("$hash", hash);
         using var reader = command.ExecuteReader();

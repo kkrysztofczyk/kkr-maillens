@@ -172,9 +172,11 @@ static class MailAttachmentRepository
             reader.IsDBNull(12) ? null : reader.GetString(12));
     }
 
-    public static void MarkDownloaded(SqliteConnection connection, long id, StoredBlob blob, string detectedMimeType)
+    public static void MarkDownloaded(SqliteConnection connection, long id, StoredBlob blob, string detectedMimeType,
+        SqliteTransaction? transaction = null)
     {
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             UPDATE mail_attachments SET blob_id=$blob,mime_type=$mime,download_status='downloaded',
                 processing_status='pending',inline_base64_data=NULL,error_code=NULL,error_message=NULL,

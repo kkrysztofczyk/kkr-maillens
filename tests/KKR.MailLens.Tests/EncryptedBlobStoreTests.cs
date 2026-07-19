@@ -65,6 +65,57 @@ public sealed class EncryptedBlobStoreTests
     }
 
     [TestMethod]
+    public void Put_RewritesLegacyRowWhoseFileIsMissingAsCurrentVersion()
+    {
+        using var db = new TestDatabase();
+        string root = Path.Combine(Path.GetTempPath(), "kkr-maillens-tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            byte[] plaintext = "Neutralny tekst legacy do odtworzenia"u8.ToArray();
+            const string sessionKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+            StoredBlob legacy = WriteLegacyBlob(db, root, sessionKey, plaintext);
+            File.Delete(Path.Combine(root, legacy.EncryptedPath.Replace('/', Path.DirectorySeparatorChar)));
+            var store = new EncryptedBlobStore(root, sessionKey);
+
+            StoredBlob rewritten = store.Put(db.Connection, plaintext);
+
+            Assert.AreEqual(legacy.Id, rewritten.Id);
+            Assert.AreEqual(2, rewritten.EncryptionVersion);
+            StoredBlob stored = EncryptedBlobStore.Get(db.Connection, legacy.Id);
+            Assert.AreEqual(2, stored.EncryptionVersion);
+            CollectionAssert.AreEqual(plaintext, store.Read(stored));
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
+
+    [TestMethod]
+    public void Put_ParticipatesInCallerTransaction()
+    {
+        using var db = new TestDatabase();
+        string root = Path.Combine(Path.GetTempPath(), "kkr-maillens-tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            byte[] plaintext = "Neutralny tekst transakcji"u8.ToArray();
+            var store = new EncryptedBlobStore(root, new string('A', 64));
+
+            using (var rolledBack = db.Connection.BeginTransaction(deferred: false))
+                store.Put(db.Connection, plaintext, rolledBack);
+            Assert.AreEqual(0, db.ScalarLong("SELECT count(*) FROM stored_blobs;"));
+
+            StoredBlob blob;
+            using (var transaction = db.Connection.BeginTransaction(deferred: false))
+            {
+                blob = store.Put(db.Connection, plaintext, transaction);
+                transaction.Commit();
+            }
+
+            Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM stored_blobs;"));
+            CollectionAssert.AreEqual(plaintext, store.Read(blob));
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
+
+    [TestMethod]
     public void Read_VersionTwoAuthenticatesVersionByte()
     {
         using var db = new TestDatabase();
