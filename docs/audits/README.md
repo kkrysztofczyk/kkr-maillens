@@ -46,6 +46,9 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Bezpośrednie uruchomienie Workera jest odrzucane, jeżeli proces nie ma ograniczonego tokenu.
 - Ctrl+C i utrata odblokowanej sesji anulują operacje zewnętrzne; zadanie wraca do kolejki bez zużycia próby.
 - Wszystkie typy zadań Workera mają niezależny heartbeat dzierżawy; utrata własności anuluje pracę, a ekstrakcja sprawdza ją ponownie przed zapisem wyniku.
+- Anulowanie Workera z GUI i pierwszy Ctrl+C w CLI wysyłają nazwany sygnał zatrzymania zamiast zabijać job object; Worker oddaje zadanie przez `Abandon`, a zamknięcie job object pozostaje awaryjnym domknięciem po okresie łaski.
+- `RetryFailed` pomija wiersze kolidujące z aktywnym duplikatem oraz przywraca tylko najnowszy z failed-duplikatów, więc masowy retry nie wycofuje się w całości przez `ux_processing_jobs_active_attachment`.
+- Monitor sesji Workera odróżnia jawne `LOCKED` od braku odpowiedzi agenta; chwilowo zajęte GUI (do ~15 s ciszy) nie wywołuje już fałszywego zamknięcia.
 - Harvest Outlooka w GUI reaguje na ręczną blokadę, wyjęcie YubiKey, wygaśnięcie TTL i blokadę przez IPC; przerwana partia korpusu jest wycofywana transakcyjnie.
 - Odzyskanie wygasłego lease zachowuje wcześniejszy kod diagnostyczny, jeżeli zadanie już go miało.
 - Działa lokalny pipeline FFmpeg → whisper.cpp z timestampami segmentów, FTS5 i sprzątaniem jawnych plików roboczych.
@@ -63,4 +66,4 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Powtarzanie metadanych wiadomości przy segmentach FTS5 pozostaje świadomym kompromisem bieżącego schematu; daje prosty, odtwarzalny ranking kosztem większego indeksu.
 - Polityka uwierzytelnienia pozostaje jawna: niepusty PIN jest dozwolony dla zgodności, a dokumentacja zaleca długą frazę lub `PIN + YubiKey`; gest dotyku zależy od konfiguracji slotu urządzenia.
 - CLI przyjmuje PIN i hasło IMAP wyłącznie interaktywnie albo przez `stdin`; test YubiKey używa losowego wyzwania i nie wypisuje odpowiedzi, a konto Gmail jest utrwalane dopiero po potwierdzeniu refresh tokenu OAuth.
-- Zestaw testów wzrósł z historycznych 20/31 do 118 testów.
+- Zestaw testów wzrósł z historycznych 20/31 do 125 testów.

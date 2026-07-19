@@ -607,8 +607,21 @@ static class Cli
         {
             using RestrictedWorkerProcess worker = RestrictedWorkerProcess.Start(executable,
                 Flag(args, "--once") ? "" : "--drain", memoryLimitMb * 1024L * 1024L);
-            worker.Process.WaitForExit();
-            return worker.Process.ExitCode;
+            int stopRequests = 0;
+            ConsoleCancelEventHandler onCancel = (_, e) =>
+            {
+                // Pierwszy Ctrl+C: łagodne zatrzymanie (Worker oddaje zadanie i kończy się sam).
+                // Kolejny: pozwól ubić CLI — zamknięcie job object zabierze ze sobą Workera.
+                e.Cancel = Interlocked.Increment(ref stopRequests) == 1;
+                worker.RequestStop();
+            };
+            Console.CancelKeyPress += onCancel;
+            try
+            {
+                worker.Process.WaitForExit();
+                return worker.Process.ExitCode;
+            }
+            finally { Console.CancelKeyPress -= onCancel; }
         }
         catch (Exception ex) when (ex is Win32Exception or PlatformNotSupportedException)
         {

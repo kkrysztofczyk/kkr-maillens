@@ -31,6 +31,13 @@ ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
     shutdown.Cancel();
 };
 Console.CancelKeyPress += cancelHandler;
+// Launcher (GUI/CLI) sygnalizuje anulowanie nazwanym zdarzeniem zamiast zabijać job object —
+// dzięki temu bieżące zadanie wraca do kolejki przez Abandon, a nie wisi jako 'running'.
+using EventWaitHandle? stopSignal = WorkerStopSignal.TryOpenForCurrentProcess();
+RegisteredWaitHandle? stopRegistration = stopSignal is null ? null
+    : ThreadPool.RegisterWaitForSingleObject(stopSignal,
+        (_, _) => { try { shutdown.Cancel(); } catch (ObjectDisposedException) { } },
+        null, Timeout.Infinite, executeOnlyOnce: true);
 Task sessionMonitor = MonitorSessionAsync(shutdown, () => Interlocked.Exchange(ref sessionLocked, 1));
 
 try
@@ -186,6 +193,7 @@ try
 }
 finally
 {
+    stopRegistration?.Unregister(null);
     shutdown.Cancel();
     await sessionMonitor.ConfigureAwait(false);
     Console.CancelKeyPress -= cancelHandler;
@@ -259,21 +267,30 @@ static async Task<DownloadedAttachment> DownloadImapAsync(MailAttachmentReposito
 
 static async Task MonitorSessionAsync(CancellationTokenSource shutdown, Action onLocked)
 {
+    const int maxMissedResponses = 5;
     int missedResponses = 0;
     try
     {
         while (true)
         {
             await Task.Delay(TimeSpan.FromSeconds(1), shutdown.Token).ConfigureAwait(false);
-            string? status = Ipc.Request("STATUS", 500);
+            string? status = Ipc.Request("STATUS", 2_000);
             if (status?.StartsWith("UNLOCKED ", StringComparison.Ordinal) == true)
             {
                 missedResponses = 0;
                 continue;
             }
-            if (status?.StartsWith("LOCKED", StringComparison.Ordinal) == true || ++missedResponses >= 3)
+            if (status?.StartsWith("LOCKED", StringComparison.Ordinal) == true)
             {
                 onLocked();
+                shutdown.Cancel();
+                return;
+            }
+            // Brak odpowiedzi to nie blokada — GUI bywa zajęte kilka sekund (odświeżanie,
+            // dialogi). Dopiero dłuższa cisza agenta oznacza brak sesji do pracy.
+            if (++missedResponses >= maxMissedResponses)
+            {
+                Console.Error.WriteLine("Agent GUI nie odpowiada — przerywam przetwarzanie.");
                 shutdown.Cancel();
                 return;
             }
