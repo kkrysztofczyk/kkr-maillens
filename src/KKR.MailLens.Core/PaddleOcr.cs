@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
@@ -17,11 +18,20 @@ sealed record PaddleOcrOptions(
     public string ModelName => $"{ModelVersion}:{Language}:{Device}";
 }
 
-sealed class PaddleOcrEngine
+sealed class PaddleOcrEngine : IDisposable
 {
     const int MaxOutputCharacters = 8 * 1024 * 1024;
+    const int MaxErrorTailCharacters = 16 * 1024;
     readonly PaddleOcrOptions options;
     readonly string runnerPath;
+    readonly SemaphoreSlim gate = new(1, 1);
+    readonly StringBuilder errorTail = new();
+    readonly object errorSync = new();
+    Process? process;
+    Stream? input;
+    StreamReader? output;
+    Task? errorDrain;
+    bool disposed;
 
     public string ModelName => options.ModelName;
 
@@ -53,70 +63,106 @@ sealed class PaddleOcrEngine
         if (image.Length == 0) throw new InvalidDataException("Obraz OCR jest pusty.");
         if (!mimeType.StartsWith("image/", StringComparison.Ordinal))
             throw new NotSupportedException($"PaddleOCR nie obsługuje typu {mimeType}.");
+        ObjectDisposedException.ThrowIf(disposed, this);
 
-        using Process process = StartProcess();
-        using var timeout = new CancellationTokenSource(options.EffectiveTimeout);
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
-        Task<string> outputTask = ReadBoundedAsync(process.StandardOutput, MaxOutputCharacters, linked.Token);
-        Task<string> errorTask = ReadBoundedAsync(process.StandardError, 16 * 1024, linked.Token);
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await process.StandardInput.BaseStream.WriteAsync(image, linked.Token).ConfigureAwait(false);
-            process.StandardInput.Close();
-            await process.WaitForExitAsync(linked.Token).ConfigureAwait(false);
-            string output = await outputTask.ConfigureAwait(false);
-            string error = await errorTask.ConfigureAwait(false);
-            if (process.ExitCode != 0)
-                throw new InvalidOperationException(
-                    $"PaddleOCR zakończył się kodem {process.ExitCode}: {Limit(error)}");
+            using var timeout = new CancellationTokenSource(options.EffectiveTimeout);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
+            PaddleResponse response;
+            try
+            {
+                // Odczyty potoków procesu nie reagują na token, więc anulowanie
+                // ubija proces — zamknięty potok odblokowuje oczekujące operacje.
+                using CancellationTokenRegistration killOnCancel = linked.Token.Register(() =>
+                {
+                    Process? current = process;
+                    if (current is not null) TryKill(current);
+                });
+                response = await ExchangeWithRetryAsync(image, linked.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                await KillAndDiagnoseAsync().ConfigureAwait(false);
+                throw new TimeoutException($"PaddleOCR przekroczył limit {options.EffectiveTimeout.TotalSeconds:0} s.");
+            }
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+            {
+                string error = await KillAndDiagnoseAsync().ConfigureAwait(false);
+                string detail = error.Length == 0 ? ex.Message : error;
+                throw new InvalidOperationException($"PaddleOCR przerwał strumień wejściowy: {DiagnosticText.Limit(detail)}", ex);
+            }
+            catch
+            {
+                KillRunner();
+                throw;
+            }
 
-            string raw = ParseText(output);
+            if (response.Error is not null)
+                throw new InvalidOperationException(
+                    $"PaddleOCR zgłosił błąd rozpoznawania: {DiagnosticText.Limit(response.Error)}");
+
+            string raw = response.Text!;
             string clean = TextNormalizer.Normalize(raw);
             return new ExtractionResult(mimeType, raw, clean, false,
                 clean.Length == 0 ? [] : [new ExtractedSegment(0, raw, clean)]);
         }
-        catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        finally
         {
-            TryKill(process);
-            throw new TimeoutException($"PaddleOCR przekroczył limit {options.EffectiveTimeout.TotalSeconds:0} s.");
-        }
-        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
-        {
-            TryKill(process);
-            string error = await DiagnosticAsync(errorTask).ConfigureAwait(false);
-            string detail = error.Length == 0 ? ex.Message : error;
-            throw new InvalidOperationException($"PaddleOCR przerwał strumień wejściowy: {Limit(detail)}", ex);
-        }
-        catch
-        {
-            TryKill(process);
-            throw;
+            gate.Release();
         }
     }
 
-    Process StartProcess()
+    public void Dispose()
     {
-        var start = new ProcessStartInfo
+        if (disposed) return;
+        disposed = true;
+        try { input?.Close(); } catch { }
+        Process? current = process;
+        if (current is not null)
         {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        if (Path.GetExtension(options.PythonPath).Equals(".cmd", StringComparison.OrdinalIgnoreCase)
-            || Path.GetExtension(options.PythonPath).Equals(".bat", StringComparison.OrdinalIgnoreCase))
-        {
-            start.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
-            start.ArgumentList.Add("/d");
-            start.ArgumentList.Add("/c");
-            start.ArgumentList.Add(options.PythonPath);
+            try { if (!current.WaitForExit(2000)) TryKill(current); } catch { TryKill(current); }
+            try { current.Dispose(); } catch { }
         }
-        else
+        process = null;
+        input = null;
+        output = null;
+        errorDrain = null;
+        gate.Dispose();
+    }
+
+    async Task<PaddleResponse> ExchangeWithRetryAsync(byte[] image, CancellationToken token)
+    {
+        for (int attempt = 0; ; attempt++)
         {
-            start.FileName = options.PythonPath;
-            start.ArgumentList.Add("-I");
+            EnsureRunnerStarted();
+            token.ThrowIfCancellationRequested();
+            try
+            {
+                await WriteFrameAsync(image, token).ConfigureAwait(false);
+                string? line = await ReadResponseLineAsync(token).ConfigureAwait(false);
+                if (line is not null) return ParseResponse(line);
+                token.ThrowIfCancellationRequested();
+                if (attempt > 0) throw await RunnerExitFailureAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex) when (attempt == 0 && !token.IsCancellationRequested
+                && ex is IOException or ObjectDisposedException)
+            {
+                // Proces padł między stronami — restart i jednorazowe ponowienie.
+            }
+            KillRunner();
         }
+    }
+
+    void EnsureRunnerStarted()
+    {
+        if (process is { HasExited: false }) return;
+        KillRunner();
+        ProcessStartInfo start = ProcessRunner.CreateStartInfo(options.PythonPath, redirectInput: true);
+        start.StandardOutputEncoding = Encoding.UTF8;
+        start.StandardErrorEncoding = Encoding.UTF8;
+        if (!ProcessRunner.IsBatchScript(options.PythonPath)) start.ArgumentList.Add("-I");
         start.ArgumentList.Add(runnerPath);
         start.ArgumentList.Add("--lang");
         start.ArgumentList.Add(options.Language);
@@ -127,23 +173,63 @@ sealed class PaddleOcrEngine
         start.ArgumentList.Add("--min-confidence");
         start.ArgumentList.Add(options.MinimumConfidence.ToString(
             System.Globalization.CultureInfo.InvariantCulture));
-        return Process.Start(start) ?? throw new InvalidOperationException("Nie udało się uruchomić PaddleOCR.");
+        Process started = ProcessRunner.Start(start, "PaddleOCR");
+        process = started;
+        input = started.StandardInput.BaseStream;
+        output = started.StandardOutput;
+        lock (errorSync) errorTail.Clear();
+        errorDrain = DrainErrorAsync(started.StandardError, errorTail, errorSync);
     }
 
-    static string ParseText(string output)
+    async Task WriteFrameAsync(byte[] image, CancellationToken token)
+    {
+        byte[] header = new byte[4];
+        BinaryPrimitives.WriteInt32BigEndian(header, image.Length);
+        Stream stream = input!;
+        await stream.WriteAsync(header, token).ConfigureAwait(false);
+        await stream.WriteAsync(image, token).ConfigureAwait(false);
+        await stream.FlushAsync(token).ConfigureAwait(false);
+    }
+
+    async Task<string?> ReadResponseLineAsync(CancellationToken token)
+    {
+        StreamReader reader = output!;
+        var line = new StringBuilder(256);
+        char[] single = new char[1];
+        while (true)
+        {
+            int read = await reader.ReadAsync(single.AsMemory(), token).ConfigureAwait(false);
+            if (read == 0)
+            {
+                token.ThrowIfCancellationRequested();
+                return null;
+            }
+            if (single[0] == '\n') return line.ToString();
+            if (line.Length >= MaxOutputCharacters)
+                throw new InvalidDataException("PaddleOCR przekroczył limit rozmiaru odpowiedzi.");
+            line.Append(single[0]);
+        }
+    }
+
+    static PaddleResponse ParseResponse(string line)
     {
         try
         {
-            using JsonDocument json = JsonDocument.Parse(output, new JsonDocumentOptions
+            using JsonDocument json = JsonDocument.Parse(line, new JsonDocumentOptions
             {
                 AllowTrailingCommas = false,
                 CommentHandling = JsonCommentHandling.Disallow,
                 MaxDepth = 16,
             });
-            if (!json.RootElement.TryGetProperty("text", out JsonElement text)
+            if (json.RootElement.ValueKind == JsonValueKind.Object
+                && json.RootElement.TryGetProperty("error", out JsonElement error)
+                && error.ValueKind == JsonValueKind.String)
+                return new PaddleResponse(null, error.GetString() ?? "");
+            if (json.RootElement.ValueKind != JsonValueKind.Object
+                || !json.RootElement.TryGetProperty("text", out JsonElement text)
                 || text.ValueKind != JsonValueKind.String)
                 throw new InvalidDataException("Adapter PaddleOCR nie zwrócił pola text.");
-            return text.GetString() ?? "";
+            return new PaddleResponse(text.GetString() ?? "", null);
         }
         catch (JsonException ex)
         {
@@ -151,24 +237,63 @@ sealed class PaddleOcrEngine
         }
     }
 
-    static async Task<string> ReadBoundedAsync(StreamReader reader, int maxCharacters,
-        CancellationToken cancellationToken)
+    async Task<Exception> RunnerExitFailureAsync()
     {
-        var result = new StringBuilder(Math.Min(maxCharacters, 16 * 1024));
-        char[] buffer = new char[4096];
-        bool exceeded = false;
-        while (true)
+        int? exitCode = null;
+        try
         {
-            int read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
-            if (read == 0)
-            {
-                if (exceeded) throw new InvalidDataException("PaddleOCR przekroczył limit rozmiaru odpowiedzi.");
-                return result.ToString();
-            }
-            int remaining = maxCharacters - result.Length;
-            if (remaining > 0) result.Append(buffer, 0, Math.Min(read, remaining));
-            exceeded |= read > remaining;
+            Process? current = process;
+            if (current is not null && current.WaitForExit(2000)) exitCode = current.ExitCode;
         }
+        catch { }
+        string error = await KillAndDiagnoseAsync().ConfigureAwait(false);
+        return exitCode is int code
+            ? new InvalidOperationException($"PaddleOCR zakończył się kodem {code}: {DiagnosticText.Limit(error)}")
+            : new InvalidOperationException(
+                $"PaddleOCR zakończył strumień wyjściowy bez odpowiedzi: {DiagnosticText.Limit(error)}");
+    }
+
+    async Task<string> KillAndDiagnoseAsync()
+    {
+        Task? drain = errorDrain;
+        KillRunner();
+        if (drain is not null)
+        {
+            try { await drain.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false); } catch { }
+        }
+        lock (errorSync) return errorTail.ToString();
+    }
+
+    void KillRunner()
+    {
+        Process? current = process;
+        process = null;
+        input = null;
+        output = null;
+        errorDrain = null;
+        if (current is null) return;
+        TryKill(current);
+        try { current.Dispose(); } catch { }
+    }
+
+    static async Task DrainErrorAsync(StreamReader reader, StringBuilder tail, object sync)
+    {
+        char[] buffer = new char[4096];
+        try
+        {
+            while (true)
+            {
+                int read = await reader.ReadAsync(buffer.AsMemory(), CancellationToken.None).ConfigureAwait(false);
+                if (read == 0) return;
+                lock (sync)
+                {
+                    tail.Append(buffer, 0, read);
+                    if (tail.Length > MaxErrorTailCharacters * 2)
+                        tail.Remove(0, tail.Length - MaxErrorTailCharacters);
+                }
+            }
+        }
+        catch { }
     }
 
     static string ResolveRunnerPath(string configuredPath)
@@ -195,15 +320,5 @@ sealed class PaddleOcrEngine
         catch { }
     }
 
-    static async Task<string> DiagnosticAsync(Task<string> errorTask)
-    {
-        try { return await errorTask.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false); }
-        catch { return ""; }
-    }
-
-    static string Limit(string value)
-    {
-        string clean = value.Replace('\r', ' ').Replace('\n', ' ').Trim();
-        return clean.Length <= 500 ? clean : clean[..500];
-    }
+    readonly record struct PaddleResponse(string? Text, string? Error);
 }
