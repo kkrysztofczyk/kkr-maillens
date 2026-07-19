@@ -25,6 +25,28 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
   w ciało (np. `while (true)` z jawnym `break`, albo flaga `restart`), zachowując semantykę resetu.
   Po naprawie zdjąć `[Ignore]`.
 
+- **Awaria fallbacku PaddleOCR trwale psuje ukończone zadanie OCR.** W
+  `OcrAttachmentProcessor.ExtractWithFallbackAsync` (`src/KKR.MailLens.Core/TesseractOcr.cs`)
+  wywołanie `await fallback.ExtractAsync(image, mimeType, cancellationToken)` nie jest owinięte
+  w `try/catch`. Gdy Tesseract zwróci pusty tekst (poprawny, ukończony wynik dla pustego obrazu),
+  a następnie fallback PaddleOCR rzuci wyjątek (brak Pythona, błąd runnera, timeout), wyjątek
+  propaguje w górę i po `max_attempts` oznacza jako `failed` dokument, który wcześniej kończył się
+  sukcesem z pustym wynikiem. Sugerowana naprawa: owinąć wywołanie fallbacku w `try/catch`,
+  przy awarii zarejestrować diagnostykę (np. `Trace.TraceWarning`) i zwrócić prymarny (pusty)
+  wynik `new OcrRun(primaryResult, false)` zamiast rzucać; zachować propagację
+  `OperationCanceledException` przy anulowaniu inicjowanym przez użytkownika. Test regresyjny:
+  Tesseract pusty + fallback rzuca → dokument `completed` z prymarnym pustym wynikiem, nie `failed`.
+
+- **OCR Tesseracta gubi polskie znaki (mojibake).** `TesseractOcrEngine.StartProcess`
+  (`src/KKR.MailLens.Core/TesseractOcr.cs`) przekierowuje stdout/stderr, ale nie ustawia
+  `StandardOutputEncoding`/`StandardErrorEncoding`. Tesseract wypisuje UTF-8, więc .NET dekoduje
+  strumień w systemowym kodowaniu ANSI (na PL Windows zwykle Windows-1250) i znaki `ą ć ę ł ń ó ś ż ź`
+  trafiają do `content_segments` jako mojibake. Strona PaddleOCR (`PaddleOcr.cs`) i runner Python
+  mają już poprawkę UTF-8; brakuje analogicznej po stronie Tesseracta. Sugerowana naprawa: ustawić
+  `StandardOutputEncoding = Encoding.UTF8` oraz `StandardErrorEncoding = Encoding.UTF8` w `StartProcess`
+  (jak w `PaddleOcr.cs` i `MediaTranscription.cs`). Test regresyjny: roundtrip tekstu z polskimi
+  znakami przez fake `tesseract` wypisujący UTF-8.
+
 ### Zamknięte lub nieaktualne
 
 - SDK 9.0.316 jest zainstalowane i zgodne z `global.json`.
