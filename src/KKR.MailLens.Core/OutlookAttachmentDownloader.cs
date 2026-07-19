@@ -61,8 +61,8 @@ sealed class OutlookAttachmentBroker : IDisposable
             if (length <= 0) throw new InvalidDataException("Załącznik Outlook jest pusty.");
             if (length > maximumBytes || length > int.MaxValue)
                 throw new InvalidDataException("Pobrany załącznik przekracza dozwolony limit rozmiaru.");
-            if (attachment.SizeBytes > 0 && length != attachment.SizeBytes)
-                throw new InvalidDataException("Rozmiar pobranego załącznika nie zgadza się z metadanymi Outlook.");
+            if (AttachmentSizeTolerance.IsGrossMismatch(length, attachment.SizeBytes))
+                throw new InvalidDataException("Rozmiar pobranego załącznika istotnie różni się od metadanych Outlook.");
 
             bytes = File.ReadAllBytes(path);
             cancellationToken.ThrowIfCancellationRequested();
