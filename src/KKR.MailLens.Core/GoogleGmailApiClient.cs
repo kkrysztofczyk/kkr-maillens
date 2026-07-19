@@ -122,7 +122,7 @@ sealed class GoogleGmailApiClient : IGmailApiClient
         return GmailAttachmentDownloader.DecodeBase64Url(body.Data);
     }
 
-    async Task<GmailApiPart> MapPart(string messageId, MessagePart part, CancellationToken cancellationToken)
+    async Task<GmailApiPart> MapPart(string messageId, MessagePart part, CancellationToken cancellationToken, int depth = 0)
     {
         string? data = part.Body?.Data;
         string? attachmentId = part.Body?.AttachmentId;
@@ -134,9 +134,11 @@ sealed class GoogleGmailApiClient : IGmailApiClient
             data = body.Data;
         }
 
+        // Limit glebokosci chroni stos; jeden poziom ponad limit mapera pozwala mu odnotowac obciecie.
         var children = new List<GmailApiPart>();
-        foreach (var child in part.Parts ?? Array.Empty<MessagePart>())
-            children.Add(await MapPart(messageId, child, cancellationToken).ConfigureAwait(false));
+        if (depth <= GmailMessageMapper.MaxMimePartDepth)
+            foreach (var child in part.Parts ?? Array.Empty<MessagePart>())
+                children.Add(await MapPart(messageId, child, cancellationToken, depth + 1).ConfigureAwait(false));
 
         return new GmailApiPart
         {

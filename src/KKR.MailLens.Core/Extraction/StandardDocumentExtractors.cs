@@ -187,12 +187,23 @@ static class OpenXmlArchiveSafety
 {
     public static void Validate(byte[] content, TextExtractionOptions options)
     {
+        // Ograniczony odczyt katalogu centralnego zanim ZipArchive zmaterializuje wszystkie wpisy.
+        if (ZipCentralDirectory.TryReadEntryNames(content, options.MaxArchiveEntries, out bool exceedsLimit) is null)
+            throw new InvalidDataException("Archiwum OpenXML ma niepoprawny katalog centralny.");
+        if (exceedsLimit)
+            throw new InvalidDataException($"Archiwum OpenXML przekracza limit {options.MaxArchiveEntries} wpisów.");
+
         using var stream = new MemoryStream(content, writable: false);
         using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
         if (archive.Entries.Count > options.MaxArchiveEntries)
             throw new InvalidDataException($"Archiwum OpenXML przekracza limit {options.MaxArchiveEntries} wpisów.");
 
+        // Zadeklarowane rozmiary (ZipArchiveEntry.Length/CompressedLength) pochodza z katalogu
+        // centralnego kontrolowanego przez nadawce, wiec limity egzekwujemy na RZECZYWISTYCH
+        // bajtach dekompresji — czytajac kazdy wpis przez bufor, zanim SDK OpenXML sam otworzy
+        // czesci pakietu. Bajty sa odrzucane w locie, wiec straznik nie alokuje rozprezonej tresci.
         long expandedTotal = 0;
+        byte[] buffer = new byte[81_920];
         foreach (ZipArchiveEntry entry in archive.Entries)
         {
             string normalized = entry.FullName.Replace('\\', '/');
@@ -200,16 +211,30 @@ static class OpenXmlArchiveSafety
                 || normalized.Split('/', StringSplitOptions.RemoveEmptyEntries).Contains("..", StringComparer.Ordinal))
                 throw new InvalidDataException("Archiwum OpenXML zawiera niebezpieczną ścieżkę wpisu.");
 
-            if (entry.Length > options.MaxArchiveExpandedBytes - expandedTotal)
+            long compressed = Math.Max(1, entry.CompressedLength);
+            expandedTotal += ReadExpandedWithLimits(entry, buffer, compressed, expandedTotal, options);
+        }
+    }
+
+    static long ReadExpandedWithLimits(ZipArchiveEntry entry, byte[] buffer, long compressed,
+        long expandedTotal, TextExtractionOptions options)
+    {
+        long budgetRemaining = options.MaxArchiveExpandedBytes - expandedTotal;
+        long ratioLimit = compressed * (long)options.MaxArchiveCompressionRatio;
+        long actual = 0;
+        using Stream source = entry.Open();
+        int read;
+        while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            actual += read;
+            if (actual > budgetRemaining)
                 throw new InvalidDataException(
                     $"Archiwum OpenXML przekracza limit {options.MaxArchiveExpandedBytes} bajtów po rozwinięciu.");
-            expandedTotal += entry.Length;
-
-            long compressed = Math.Max(1, entry.CompressedLength);
-            if (entry.Length > compressed * (long)options.MaxArchiveCompressionRatio)
+            if (actual > ratioLimit)
                 throw new InvalidDataException(
                     $"Wpis archiwum OpenXML przekracza limit kompresji {options.MaxArchiveCompressionRatio}:1.");
         }
+        return actual;
     }
 }
 
