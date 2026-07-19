@@ -101,6 +101,39 @@ public sealed class ProcessingJobRepositoryTests
     }
 
     [TestMethod]
+    public void RenewLease_MonitorCadenceOutlastsSequentialOcrFallback()
+    {
+        using var db = new TestDatabase();
+        long attachmentId = AddAttachment(db);
+        // Regresja audytu workera: najgorszy przypadek pierwszej strony batcha PDF to sekwencyjnie
+        // render + Tesseract + fallback PaddleOCR bez heartbeatu z wnętrza pipeline'u OCR.
+        // Odnowienia w kadencji ProcessingLeaseMonitor muszą utrzymać własność przez cały ten czas.
+        var config = new AppConfig();
+        TimeSpan sequentialFallback = TimeSpan.FromSeconds(config.OcrPdfRenderTimeoutSeconds
+            + config.OcrTimeoutSeconds + config.PaddleOcrTimeoutSeconds);
+        TimeSpan leaseDuration = TimeSpan.FromMinutes(5);    // dzierżawa workera z Program.cs
+        TimeSpan renewalInterval = TimeSpan.FromSeconds(30); // interwał ProcessingLeaseMonitor dla tej dzierżawy
+        Assert.IsTrue(sequentialFallback > leaseDuration,
+            "Scenariusz regresji wymaga przetwarzania dłuższego niż pojedyncza dzierżawa.");
+        DateTimeOffset start = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        ProcessingJobRepository.Enqueue(db.Connection, "ocr", attachmentId, availableAt: start);
+        ProcessingJob job = ProcessingJobRepository.LeaseNext(
+            db.Connection, "worker-1", leaseDuration, start)!;
+
+        for (DateTimeOffset now = start + renewalInterval; now <= start + sequentialFallback;
+            now += renewalInterval)
+        {
+            Assert.IsNull(ProcessingJobRepository.LeaseNext(db.Connection, "worker-2", leaseDuration, now),
+                $"Zadanie OCR zostało przejęte po {(now - start).TotalSeconds:0} s mimo odnowień.");
+            Assert.IsTrue(ProcessingJobRepository.RenewLease(
+                db.Connection, job.Id, "worker-1", leaseDuration, now));
+        }
+
+        Assert.IsTrue(ProcessingJobRepository.Complete(db.Connection, job.Id, "worker-1"));
+        Assert.AreEqual("completed", db.ScalarText("SELECT status FROM processing_jobs WHERE id=" + job.Id + ";"));
+    }
+
+    [TestMethod]
     public void Complete_OnlyOwnerCanCompleteRunningJob()
     {
         using var db = new TestDatabase();
