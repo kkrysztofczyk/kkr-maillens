@@ -240,6 +240,38 @@ public sealed class MediaTranscriptionTests
         }
     }
 
+    [TestMethod]
+    public async Task Toolchain_ReportsFfmpegStderrWhenInputPipeBreaks()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "kkr-maillens-transcription-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string ffmpeg = Path.Combine(directory, "early-exit-ffmpeg.cmd");
+            File.WriteAllText(ffmpeg, """
+                @echo off
+                echo moov atom not found 1>&2
+                exit /b 1
+                """.Replace("\n", "\r\n", StringComparison.Ordinal));
+            string whisper = Path.Combine(directory, "unused-whisper.cmd");
+            File.WriteAllText(whisper, "@echo off\r\nexit /b 0\r\n");
+            string model = Path.Combine(directory, "ggml-small.bin");
+            await File.WriteAllBytesAsync(model, [1]);
+            var transcriber = new FfmpegWhisperTranscriber(new MediaTranscriptionOptions(
+                ffmpeg, whisper, model, "auto", TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(5),
+                MaxDurationMinutes: 1, TempDirectory: Path.Combine(directory, "temp")));
+
+            InvalidOperationException exception = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                () => transcriber.TranscribeAsync(new byte[4 * 1024 * 1024], "video/mp4"));
+
+            StringAssert.Contains(exception.Message, "moov atom not found");
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch { }
+        }
+    }
+
     static string WriteFakeFfmpeg(string directory)
     {
         string ffmpeg = Path.Combine(directory, "fake-fallback-ffmpeg.cmd");

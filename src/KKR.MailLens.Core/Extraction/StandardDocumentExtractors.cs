@@ -94,16 +94,19 @@ sealed class ExcelExtractor : IContentExtractor
             ?? throw new InvalidDataException("Skoroszyt XLSX nie zawiera części głównej.");
         S.Workbook workbookRoot = workbook.Workbook
             ?? throw new InvalidDataException("Skoroszyt XLSX nie zawiera definicji arkuszy.");
+        string[] sharedStrings = workbook.SharedStringTablePart?.SharedStringTable?
+            .Elements<S.SharedStringItem>().Select(item => item.InnerText).ToArray() ?? [];
         var segments = new List<SegmentDraft>();
         foreach (S.Sheet sheet in workbookRoot.Sheets?.Elements<S.Sheet>() ?? [])
         {
             if (sheet.Id?.Value is not string relationshipId) continue;
-            if (workbook.GetPartById(relationshipId) is not WorksheetPart worksheet) continue;
+            if (!workbook.TryGetPartById(relationshipId, out OpenXmlPart? part)) continue;
+            if (part is not WorksheetPart worksheet) continue;
             var rows = new List<string>();
             foreach (S.Row row in worksheet.Worksheet?.Descendants<S.Row>() ?? [])
             {
                 string text = string.Join(" | ", row.Elements<S.Cell>()
-                    .Select(cell => FormatCell(cell, workbook))
+                    .Select(cell => FormatCell(cell, sharedStrings))
                     .Where(value => value.Length > 0));
                 if (text.Length > 0) rows.Add(text);
             }
@@ -112,14 +115,13 @@ sealed class ExcelExtractor : IContentExtractor
         return ExtractionResultBuilder.Build(MimeType, segments, options);
     }
 
-    static string FormatCell(S.Cell cell, WorkbookPart workbook)
+    static string FormatCell(S.Cell cell, string[] sharedStrings)
     {
         S.CellValues? dataType = cell.DataType?.Value;
         string value;
         if (dataType == S.CellValues.SharedString && int.TryParse(cell.InnerText, out int index))
         {
-            value = workbook.SharedStringTablePart?.SharedStringTable?.Elements<S.SharedStringItem>()
-                .ElementAtOrDefault(index)?.InnerText ?? "";
+            value = index >= 0 && index < sharedStrings.Length ? sharedStrings[index] : "";
         }
         else if (dataType == S.CellValues.InlineString)
         {
@@ -156,7 +158,8 @@ sealed class PowerPointExtractor : IContentExtractor
         {
             slideNumber++;
             if (slideId.RelationshipId?.Value is not string relationshipId) continue;
-            if (presentation.GetPartById(relationshipId) is not SlidePart slide) continue;
+            if (!presentation.TryGetPartById(relationshipId, out OpenXmlPart? part)) continue;
+            if (part is not SlidePart slide) continue;
             var text = (slide.Slide?.Descendants<A.Text>() ?? []).Select(value => value.Text).Where(value => value.Length > 0).ToList();
             if (slide.NotesSlidePart?.NotesSlide is { } notes)
                 text.AddRange(notes.Descendants<A.Text>().Select(value => value.Text).Where(value => value.Length > 0));
