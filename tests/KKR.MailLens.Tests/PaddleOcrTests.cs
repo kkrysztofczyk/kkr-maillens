@@ -5,6 +5,8 @@ namespace KKR.MailLens.Tests;
 [TestClass]
 public sealed class PaddleOcrTests
 {
+    static readonly byte[] PngHeader = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+
     [TestMethod]
     public async Task OcrPipeline_UsesPaddleOnlyWhenTesseractReturnsNoText()
     {
@@ -14,7 +16,7 @@ public sealed class PaddleOcrTests
         {
             string tesseract = WriteCommand(directory, "blank-tesseract.cmd", "more >nul");
             string paddle = WriteCommand(directory, "fake-python.cmd",
-                "more >nul\r\necho {\"text\":\"Neutralny tekst PaddleOCR\"}");
+                "echo {\"text\":\"Neutralny tekst PaddleOCR\"}\r\nmore >nul");
             string runner = Path.Combine(directory, "runner.py");
             File.WriteAllText(runner, "# neutral test adapter placeholder");
             (long attachmentId, long documentId, EncryptedBlobStore store) = AddImage(db, directory);
@@ -69,14 +71,96 @@ public sealed class PaddleOcrTests
         try
         {
             string paddle = WriteCommand(directory, "invalid-python.cmd",
-                "more >nul\r\necho invalid-json");
+                "echo invalid-json\r\nmore >nul");
             string runner = Path.Combine(directory, "runner.py");
             File.WriteAllText(runner, "# neutral test adapter placeholder");
-            var engine = new PaddleOcrEngine(new PaddleOcrOptions(
+            using var engine = new PaddleOcrEngine(new PaddleOcrOptions(
                 paddle, runner, Timeout: TimeSpan.FromSeconds(5)));
 
             await Assert.ThrowsExactlyAsync<InvalidDataException>(() => engine.ExtractAsync(
-                [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], "image/png"));
+                PngHeader, "image/png"));
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch { }
+        }
+    }
+
+    [TestMethod]
+    public async Task Engine_ReusesRunnerProcessAcrossPages()
+    {
+        string directory = CreateDirectory();
+        try
+        {
+            string paddle = WriteCommand(directory, "fake-python.cmd",
+                "echo started>>\"%~dp0starts.log\"\r\n"
+                + "echo {\"text\":\"Strona testowa\"}\r\n"
+                + "echo {\"text\":\"Strona testowa\"}\r\n"
+                + "more >nul");
+            string runner = Path.Combine(directory, "runner.py");
+            File.WriteAllText(runner, "# neutral test adapter placeholder");
+            using var engine = new PaddleOcrEngine(new PaddleOcrOptions(
+                paddle, runner, Timeout: TimeSpan.FromSeconds(5)));
+
+            ExtractionResult first = await engine.ExtractAsync(PngHeader, "image/png");
+            ExtractionResult second = await engine.ExtractAsync(PngHeader, "image/png");
+
+            Assert.AreEqual("Strona testowa", first.CleanText);
+            Assert.AreEqual("Strona testowa", second.CleanText);
+            Assert.AreEqual(1, File.ReadAllLines(Path.Combine(directory, "starts.log")).Length,
+                "Dwie strony powinny użyć jednego procesu adaptera.");
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch { }
+        }
+    }
+
+    [TestMethod]
+    public async Task Engine_RestartsRunnerWhenItDiesWithoutResponse()
+    {
+        string directory = CreateDirectory();
+        try
+        {
+            string paddle = WriteCommand(directory, "fake-python.cmd",
+                "echo started>>\"%~dp0starts.log\"\r\n"
+                + "if exist \"%~dp0crashed.flag\" (\r\n"
+                + "echo {\"text\":\"Restart dziala\"}\r\n"
+                + "more >nul\r\n"
+                + ") else (\r\n"
+                + "echo flag>\"%~dp0crashed.flag\"\r\n"
+                + ")");
+            string runner = Path.Combine(directory, "runner.py");
+            File.WriteAllText(runner, "# neutral test adapter placeholder");
+            using var engine = new PaddleOcrEngine(new PaddleOcrOptions(
+                paddle, runner, Timeout: TimeSpan.FromSeconds(10)));
+
+            ExtractionResult result = await engine.ExtractAsync(PngHeader, "image/png");
+
+            Assert.AreEqual("Restart dziala", result.CleanText);
+            Assert.AreEqual(2, File.ReadAllLines(Path.Combine(directory, "starts.log")).Length,
+                "Po padzie adaptera strona powinna zostać ponowiona w nowym procesie.");
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch { }
+        }
+    }
+
+    [TestMethod]
+    public async Task Engine_TimesOutWhenRunnerStaysSilent()
+    {
+        string directory = CreateDirectory();
+        try
+        {
+            string paddle = WriteCommand(directory, "silent-python.cmd", "more >nul");
+            string runner = Path.Combine(directory, "runner.py");
+            File.WriteAllText(runner, "# neutral test adapter placeholder");
+            using var engine = new PaddleOcrEngine(new PaddleOcrOptions(
+                paddle, runner, Timeout: TimeSpan.FromSeconds(2)));
+
+            await Assert.ThrowsExactlyAsync<TimeoutException>(() => engine.ExtractAsync(
+                PngHeader, "image/png"));
         }
         finally
         {

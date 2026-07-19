@@ -140,7 +140,7 @@ static class OcrAttachmentProcessor
         {
             DetectedFile detected = FileTypeDetector.Detect(item.Filename, item.MimeType, plaintext);
             var engine = new TesseractOcrEngine(options);
-            PaddleOcrEngine? fallback = fallbackOptions is null ? null : new PaddleOcrEngine(fallbackOptions);
+            using PaddleOcrEngine? fallback = fallbackOptions is null ? null : new PaddleOcrEngine(fallbackOptions);
             if (detected.MimeType == "application/pdf")
             {
                 OcrRun result = await ExtractPdfAsync(detected, engine, fallback,
