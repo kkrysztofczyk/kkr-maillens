@@ -4,7 +4,12 @@ namespace KKR.MailLens;
 
 sealed class PlainTextExtractor : IContentExtractor
 {
-    public bool CanExtract(DetectedFile file) => file.MimeType == "text/plain";
+    static readonly HashSet<string> MimeTypes = new(StringComparer.Ordinal)
+    {
+        "text/plain", "text/csv", "application/json", "application/xml", "text/xml",
+    };
+
+    public bool CanExtract(DetectedFile file) => MimeTypes.Contains(file.MimeType);
 
     public ExtractionResult Extract(DetectedFile file, TextExtractionOptions options)
     {
@@ -66,6 +71,7 @@ static class TextDecoder
         if (content.AsSpan().StartsWith(Encoding.UTF8.GetPreamble())) return (new UTF8Encoding(false), 3);
         if (content.AsSpan().StartsWith(Encoding.Unicode.GetPreamble())) return (Encoding.Unicode, 2);
         if (content.AsSpan().StartsWith(Encoding.BigEndianUnicode.GetPreamble())) return (Encoding.BigEndianUnicode, 2);
+        if (DetectBomlessUtf16(content) is { } utf16) return (utf16, 0);
 
         try
         {
@@ -76,6 +82,24 @@ static class TextDecoder
         {
             return (Encoding.GetEncoding(1250), 0);
         }
+    }
+
+    static Encoding? DetectBomlessUtf16(byte[] content)
+    {
+        // Bez BOM mostly-ASCII UTF-16 przechodzi ścisłą walidację UTF-8 (bajty zerowe są
+        // poprawnym UTF-8), więc rozkład zer na parzystych/nieparzystych pozycjach musi
+        // rozstrzygnąć przed próbą UTF-8.
+        if (content.Length < 4 || content.Length % 2 != 0) return null;
+        int zeroEven = 0, zeroOdd = 0;
+        for (int index = 0; index + 1 < content.Length; index += 2)
+        {
+            if (content[index] == 0) zeroEven++;
+            if (content[index + 1] == 0) zeroOdd++;
+        }
+        int pairs = content.Length / 2;
+        if (zeroOdd * 2 >= pairs && zeroEven * 10 <= pairs) return Encoding.Unicode;
+        if (zeroEven * 2 >= pairs && zeroOdd * 10 <= pairs) return Encoding.BigEndianUnicode;
+        return null;
     }
 }
 
