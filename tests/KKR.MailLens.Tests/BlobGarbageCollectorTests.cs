@@ -100,6 +100,101 @@ public sealed class BlobGarbageCollectorTests
         finally { try { Directory.Delete(root, recursive: true); } catch { } }
     }
 
+    [TestMethod]
+    public void Collect_SkipsCandidateThatRegainedReferenceAfterScan()
+    {
+        using var db = new TestDatabase();
+        string root = TemporaryRoot();
+        try
+        {
+            GmailAccountRecord account = db.AddAccount();
+            (long firstAttachment, _) = AddAttachment(db, account, "message-first", "attachment-first");
+            (long secondAttachment, _) = AddAttachment(db, account, "message-second", "attachment-second");
+            var store = new EncryptedBlobStore(root, new string('A', 64));
+            StoredBlob firstBlob = store.Put(db.Connection, "Neutralny tekst pierwszego pliku"u8);
+            StoredBlob secondBlob = store.Put(db.Connection, "Neutralny tekst drugiego pliku"u8);
+            MailAttachmentRepository.MarkDownloaded(db.Connection, firstAttachment, firstBlob, "text/plain");
+            MailAttachmentRepository.MarkDownloaded(db.Connection, secondAttachment, secondBlob, "text/plain");
+            SetAttachmentDeleted(db, firstAttachment);
+            SetAttachmentDeleted(db, secondAttachment);
+            string secondPath = Path.Combine(root, secondBlob.EncryptedPath.Replace('/', Path.DirectorySeparatorChar));
+
+            // Podczas sprzątania pierwszego kandydata drugi odzyskuje aktywną referencję —
+            // dokładnie okno między FindCandidates a transakcją drugiego kandydata.
+            using (var trigger = db.Connection.CreateCommand())
+            {
+                trigger.CommandText = $"""
+                    CREATE TRIGGER revive_second_attachment AFTER UPDATE ON mail_attachments
+                    WHEN NEW.id={firstAttachment} AND NEW.blob_id IS NULL
+                    BEGIN
+                        UPDATE mail_attachments SET is_deleted=0 WHERE id={secondAttachment};
+                    END;
+                    """;
+                trigger.ExecuteNonQuery();
+            }
+
+            BlobGarbageCollectionResult result = BlobGarbageCollector.Collect(db.Connection, root);
+
+            Assert.AreEqual(2, result.Orphaned);
+            Assert.AreEqual(1, result.Deleted);
+            Assert.AreEqual(0, result.Failed);
+            Assert.AreEqual(firstBlob.OriginalSize, result.ReclaimedBytes);
+            Assert.IsTrue(File.Exists(secondPath));
+            Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM stored_blobs;"));
+            Assert.AreEqual(secondBlob.Sha256, db.ScalarText("SELECT sha256 FROM stored_blobs;"));
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
+
+    [TestMethod]
+    public void Collect_KeepsBlobRowWhenReferenceReappearsInsideDeleteTransaction()
+    {
+        using var db = new TestDatabase();
+        string root = TemporaryRoot();
+        try
+        {
+            GmailAccountRecord account = db.AddAccount();
+            (long deletedAttachment, _) = AddAttachment(db, account, "message-gone", "attachment-gone");
+            (long revivedAttachment, _) = AddAttachment(db, account, "message-alive", "attachment-alive");
+            var store = new EncryptedBlobStore(root, new string('A', 64));
+            StoredBlob blob = store.Put(db.Connection, "Neutralny tekst odzyskiwanego pliku"u8);
+            MailAttachmentRepository.MarkDownloaded(db.Connection, deletedAttachment, blob, "text/plain");
+            SetAttachmentDeleted(db, deletedAttachment);
+
+            // Aktywny załącznik przejmuje referencję do blobu w trakcie transakcji sprzątającej
+            // (po re-checku IsCollectable, przed DELETE) — DELETE musi trafić na rows!=1 i się wycofać.
+            using (var trigger = db.Connection.CreateCommand())
+            {
+                trigger.CommandText = $"""
+                    CREATE TRIGGER relink_active_attachment AFTER UPDATE ON mail_attachments
+                    WHEN NEW.id={deletedAttachment} AND NEW.blob_id IS NULL
+                    BEGIN
+                        UPDATE mail_attachments SET blob_id={blob.Id},download_status='downloaded'
+                        WHERE id={revivedAttachment};
+                    END;
+                    """;
+                trigger.ExecuteNonQuery();
+            }
+
+            var warnings = new List<string>();
+            BlobGarbageCollectionResult result = BlobGarbageCollector.Collect(db.Connection, root, warnings.Add);
+
+            Assert.AreEqual(1, result.Orphaned);
+            Assert.AreEqual(0, result.Deleted);
+            Assert.AreEqual(1, result.Failed);
+            Assert.AreEqual(0, result.ReclaimedBytes);
+            Assert.HasCount(1, warnings);
+            StringAssert.Contains(warnings[0], blob.Sha256);
+            Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM stored_blobs;"));
+            // Transakcja wycofana: usunięty załącznik nadal wskazuje blob, aktywny go nie przejął.
+            Assert.AreEqual(blob.Id, db.ScalarLong(
+                $"SELECT blob_id FROM mail_attachments WHERE id={deletedAttachment};"));
+            Assert.AreEqual(0, db.ScalarLong(
+                $"SELECT count(*) FROM mail_attachments WHERE id={revivedAttachment} AND blob_id IS NOT NULL;"));
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
+
     static (long AttachmentId, string MailEntryId) AddAttachment(TestDatabase db, GmailAccountRecord account,
         string messageId, string attachmentKey)
     {

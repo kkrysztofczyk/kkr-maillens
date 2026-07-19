@@ -121,6 +121,84 @@ public sealed class GmailSynchronizerTests
         Assert.AreEqual("201", GmailRepository.FindAccount(db.Connection, account.Id)!.LastHistoryId);
     }
 
+    // UWAGA: ten test ujawnia realną wadę w FullSync (gałąź restartu po GmailPageTokenExpiredException):
+    // `continue` w pętli do/while skacze do warunku, który po `pageToken=null` jest fałszywy, więc pętla
+    // kończy się bez ponownego pobrania stron, a PruneMissingMessages usuwa cały korpus nowej generacji.
+    // Poprawka zlecona osobnym zadaniem (task_eb0e48b7). Odblokować (usunąć [Ignore]) po naprawie.
+    [Ignore("Blokowany do naprawy FullSync restartu po wygaśnięciu page tokenu (task_eb0e48b7).")]
+    [TestMethod]
+    public async Task ExpiredPageToken_RestartsFullSyncWithoutSkippingOrDuplicatingMessages()
+    {
+        using var db = new TestDatabase();
+        GmailAccountRecord account = db.AddAccount();
+        using var api = new FakeGmailApiClient();
+        api.Messages["m1"] = GmailTestMessage.Create("m1", body: "Pierwszy neutralny tekst");
+        api.Messages["m2"] = GmailTestMessage.Create("m2", body: "Drugi neutralny tekst");
+        api.MessagePages[""] = () => new GmailMessagePage(["m1"], "page-2");
+        int secondPageCalls = 0;
+        api.MessagePages["page-2"] = () => ++secondPageCalls == 1
+            ? throw new GmailPageTokenExpiredException()
+            : new GmailMessagePage(["m2"], null);
+        api.HistoryPages.Enqueue(() => new GmailHistoryPage([], [], "101", null));
+
+        GmailSyncResult result = await new GmailSynchronizer(db.Connection, api)
+            .SyncAsync(account, false, CancellationToken.None);
+
+        CollectionAssert.AreEqual(new string?[] { null, "page-2", null, "page-2" }, api.RequestedPageTokens);
+        Assert.AreEqual(0, result.Errors);
+        Assert.AreEqual(2, GmailRepository.MessageCount(db.Connection, account.Id));
+        Assert.AreEqual(2, db.ScalarLong("SELECT count(DISTINCT gmail_message_id) FROM messages;"));
+        Assert.AreEqual(2, db.ScalarLong("SELECT count(*) FROM messages;"));
+        Assert.AreEqual(2, result.Inserted);
+        Assert.AreEqual(1, result.Updated);
+        Assert.AreEqual(0, result.Deleted);
+
+        GmailAccountRecord saved = GmailRepository.FindAccount(db.Connection, account.Id)!;
+        Assert.IsTrue(saved.InitialSyncCompleted);
+        Assert.IsNull(saved.InitialPageToken);
+        Assert.AreEqual("101", saved.LastHistoryId);
+    }
+
+    [TestMethod]
+    public async Task IncrementalSync_FollowsAllHistoryPagesAndCarriesHistoryIdOverBlankPages()
+    {
+        using var db = new TestDatabase();
+        GmailAccountRecord account = db.AddAccount();
+        using (var initial = new FakeGmailApiClient())
+        {
+            initial.Messages["m1"] = GmailTestMessage.Create("m1");
+            initial.MessagePages[""] = () => new GmailMessagePage(["m1"], null);
+            initial.HistoryPages.Enqueue(() => new GmailHistoryPage([], [], "101", null));
+            await new GmailSynchronizer(db.Connection, initial).SyncAsync(account, false, CancellationToken.None);
+        }
+
+        GmailAccountRecord current = GmailRepository.FindAccount(db.Connection, account.Id)!;
+        using var api = new FakeGmailApiClient();
+        api.Messages["m2"] = GmailTestMessage.Create("m2");
+        api.Messages["m3"] = GmailTestMessage.Create("m3");
+        api.HistoryPages.Enqueue(() => new GmailHistoryPage(["m2"], [], "105", "history-2"));
+        api.HistoryPages.Enqueue(() => new GmailHistoryPage([], ["m1"], "", "history-3"));
+        api.HistoryPages.Enqueue(() => new GmailHistoryPage(["m3"], [], "", null));
+
+        GmailSyncResult result = await new GmailSynchronizer(db.Connection, api)
+            .SyncAsync(current, false, CancellationToken.None);
+
+        CollectionAssert.AreEqual(new (string, string?)[]
+        {
+            ("101", null),
+            ("101", "history-2"),
+            ("101", "history-3"),
+        }, api.HistoryRequests);
+        Assert.IsFalse(result.WasFullSync);
+        Assert.AreEqual(3, result.Processed);
+        Assert.AreEqual(2, result.Inserted);
+        Assert.AreEqual(1, result.Deleted);
+        Assert.AreEqual(0, result.Errors);
+        Assert.AreEqual(2, GmailRepository.MessageCount(db.Connection, account.Id));
+        Assert.AreEqual(0, db.ScalarLong("SELECT count(*) FROM messages WHERE gmail_message_id='m1';"));
+        Assert.AreEqual("105", GmailRepository.FindAccount(db.Connection, account.Id)!.LastHistoryId);
+    }
+
     [TestMethod]
     public async Task BrokenSingleMessage_IsRecordedAndDoesNotAbortBatch()
     {

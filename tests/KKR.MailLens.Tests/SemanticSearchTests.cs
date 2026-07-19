@@ -28,6 +28,35 @@ public sealed class SemanticSearchTests
     }
 
     [TestMethod]
+    public void OllamaOptions_RejectCredentialsQueryFragmentAndForeignSchemes()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            new OllamaEmbeddingOptions("http://user:pass@127.0.0.1:11434", "neutral-model").Validate());
+        Assert.Throws<ArgumentException>(() =>
+            new OllamaEmbeddingOptions("http://127.0.0.1:11434/?debug=1", "neutral-model").Validate());
+        Assert.Throws<ArgumentException>(() =>
+            new OllamaEmbeddingOptions("http://127.0.0.1:11434/#fragment", "neutral-model").Validate());
+        Assert.Throws<ArgumentException>(() =>
+            new OllamaEmbeddingOptions("ftp://127.0.0.1:11434", "neutral-model").Validate());
+        Assert.Throws<ArgumentException>(() =>
+            new OllamaEmbeddingOptions("http://[::2]:11434", "neutral-model").Validate());
+    }
+
+    [TestMethod]
+    public async Task OllamaProvider_RealDefaultTransportDoesNotFollowRedirects()
+    {
+        using var server = new RedirectingHttpServer();
+        using var provider = new OllamaEmbeddingProvider(new OllamaEmbeddingOptions(
+            $"http://127.0.0.1:{server.Port}", "neutral-model", TimeSpan.FromSeconds(15)));
+
+        HttpRequestException error = await Assert.ThrowsAsync<HttpRequestException>(async () =>
+            await provider.EmbedAsync(["Neutralny tekst"]));
+
+        Assert.AreEqual(HttpStatusCode.Found, error.StatusCode);
+        CollectionAssert.AreEqual(new[] { "/api/embed" }, server.RequestedPaths);
+    }
+
+    [TestMethod]
     public async Task OllamaProvider_UsesLocalEmbedApiAndNormalizesVector()
     {
         var handler = new EmbedHandler();
@@ -141,6 +170,70 @@ public sealed class SemanticSearchTests
         }
 
         public void Dispose() { }
+    }
+
+    /// <summary>Minimalny lokalny serwer HTTP odpowiadający przekierowaniem 302 na każde żądanie.
+    /// Rejestruje ścieżki, więc test wykrywa, gdyby transport podążył za Location.</summary>
+    sealed class RedirectingHttpServer : IDisposable
+    {
+        readonly System.Net.Sockets.TcpListener listener;
+        readonly Task loop;
+        readonly List<string> requestedPaths = new();
+
+        public int Port { get; }
+        public string[] RequestedPaths { get { lock (requestedPaths) return requestedPaths.ToArray(); } }
+
+        public RedirectingHttpServer()
+        {
+            listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            loop = Task.Run(ServeAsync);
+        }
+
+        async Task ServeAsync()
+        {
+            try
+            {
+                while (true)
+                {
+                    using System.Net.Sockets.TcpClient client = await listener.AcceptTcpClientAsync();
+                    using System.Net.Sockets.NetworkStream stream = client.GetStream();
+                    using var reader = new StreamReader(stream, System.Text.Encoding.ASCII, false, 1024, leaveOpen: true);
+                    string? requestLine = await reader.ReadLineAsync();
+                    if (string.IsNullOrEmpty(requestLine)) continue;
+                    string[] parts = requestLine.Split(' ');
+                    lock (requestedPaths) requestedPaths.Add(parts.Length > 1 ? parts[1] : requestLine);
+                    string? line;
+                    int contentLength = 0;
+                    while (!string.IsNullOrEmpty(line = await reader.ReadLineAsync()))
+                    {
+                        if (line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase))
+                            contentLength = int.Parse(line["Content-Length:".Length..].Trim());
+                    }
+                    var body = new char[contentLength];
+                    int read = 0;
+                    while (read < contentLength)
+                    {
+                        int chunk = await reader.ReadAsync(body, read, contentLength - read);
+                        if (chunk <= 0) break;
+                        read += chunk;
+                    }
+                    byte[] response = System.Text.Encoding.ASCII.GetBytes(
+                        "HTTP/1.1 302 Found\r\n" +
+                        $"Location: http://127.0.0.1:{Port}/redirected\r\n" +
+                        "Content-Length: 0\r\nConnection: close\r\n\r\n");
+                    await stream.WriteAsync(response);
+                }
+            }
+            catch (Exception ex) when (ex is System.Net.Sockets.SocketException or ObjectDisposedException) { }
+        }
+
+        public void Dispose()
+        {
+            listener.Stop();
+            try { loop.Wait(TimeSpan.FromSeconds(2)); } catch { }
+        }
     }
 
     sealed class EmbedHandler : HttpMessageHandler

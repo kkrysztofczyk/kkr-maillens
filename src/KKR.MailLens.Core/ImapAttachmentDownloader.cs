@@ -9,6 +9,9 @@ namespace KKR.MailLens;
 
 static class ImapAttachmentDownloader
 {
+    /// <summary>Seam testowy: pozwala testom podstawić klienta akceptującego lokalny certyfikat.</summary>
+    internal static Func<ImapClient>? ClientFactory { get; set; }
+
     public static async Task<DownloadedAttachment> DownloadAsync(ImapAccount account, string sessionKeyHex,
         MailAttachmentRepository.Item attachment, long maximumBytes = GmailAttachmentDownloader.DefaultMaximumBytes,
         CancellationToken cancellationToken = default)
@@ -24,7 +27,7 @@ static class ImapAttachmentDownloader
         if (!MimeUtils.TryParse(part.TransferEncoding, out ContentEncoding encoding))
             encoding = ContentEncoding.Default;
 
-        using var client = new ImapClient();
+        using ImapClient client = ClientFactory?.Invoke() ?? new ImapClient();
         await client.ConnectAsync(account.Host, account.Port,
             account.UseSsl ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTls,
             cancellationToken).ConfigureAwait(false);

@@ -60,6 +60,7 @@ sealed class FakeGmailApiClient : IGmailApiClient
     public Dictionary<string, Func<GmailMessagePage>> MessagePages { get; } = new(StringComparer.Ordinal);
     public Queue<Func<GmailHistoryPage>> HistoryPages { get; } = new();
     public List<string?> RequestedPageTokens { get; } = new();
+    public List<(string StartHistoryId, string? PageToken)> HistoryRequests { get; } = new();
 
     public Task<GmailProfile> GetProfileAsync(CancellationToken cancellationToken)
     { cancellationToken.ThrowIfCancellationRequested(); return Task.FromResult(Profile); }
@@ -92,6 +93,7 @@ sealed class FakeGmailApiClient : IGmailApiClient
     public Task<GmailHistoryPage> ListHistoryAsync(string startHistoryId, string? pageToken, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        HistoryRequests.Add((startHistoryId, pageToken));
         if (HistoryPages.Count == 0) return Task.FromResult(new GmailHistoryPage(Array.Empty<string>(), Array.Empty<string>(), startHistoryId, null));
         return Task.FromResult(HistoryPages.Dequeue()());
     }
