@@ -309,7 +309,7 @@ static class Cli
         {
             "sync" => GmailSync(args),
             "status" => GmailStatus(args),
-            "cancel" => GmailCancel(),
+            "cancel" => GmailCancel(args),
             _ => GmailHelp(),
         };
     }
@@ -365,20 +365,20 @@ static class Cli
 
         return RunCancelable(async cancellationToken =>
         {
-            GmailCancellation.Clear();
+            using var c = Db.Open(key, create: false);
+            Db.EnsureSchema(c);
+            IReadOnlyList<GmailAccountRecord> accounts = selector is null
+                ? GmailRepository.ListAccounts(c)
+                : GmailRepository.FindAccount(c, selector) is { } selected ? [selected] : Array.Empty<GmailAccountRecord>();
+            if (accounts.Count == 0) { Console.Error.WriteLine("Brak pasujacego konta. Uzyj 'account add gmail'."); return 1; }
+
+            foreach (GmailAccountRecord account in accounts) GmailCancellation.Clear(account.Id);
             try
             {
-                using var c = Db.Open(key, create: false);
-                Db.EnsureSchema(c);
-                IReadOnlyList<GmailAccountRecord> accounts = selector is null
-                    ? GmailRepository.ListAccounts(c)
-                    : GmailRepository.FindAccount(c, selector) is { } selected ? [selected] : Array.Empty<GmailAccountRecord>();
-                if (accounts.Count == 0) { Console.Error.WriteLine("Brak pasujacego konta. Uzyj 'account add gmail'."); return 1; }
-
                 int exit = 0;
                 foreach (GmailAccountRecord account in accounts)
                 {
-                    GmailCancellation.ThrowIfRequested(cancellationToken);
+                    GmailCancellation.ThrowIfRequested(account.Id, cancellationToken);
                     Console.WriteLine($"Gmail sync: {account.Email} ({(full ? "pelna" : "automatyczna")}).");
                     try
                     {
@@ -398,7 +398,10 @@ static class Cli
                 }
                 return exit;
             }
-            finally { GmailCancellation.Clear(); }
+            finally
+            {
+                foreach (GmailAccountRecord account in accounts) GmailCancellation.Clear(account.Id);
+            }
         });
     }
 
@@ -426,10 +429,19 @@ static class Cli
         return 0;
     }
 
-    static int GmailCancel()
+    static int GmailCancel(string[] args)
     {
-        GmailCancellation.Request();
-        Console.WriteLine("Zgloszono anulowanie synchronizacji Gmail.");
+        string? key = RequireKey(); if (key is null) return 2;
+        string? selector = GetStr(args, "--account");
+        if (!File.Exists(Paths.CorpusDb)) { Console.Error.WriteLine("Korpus nie istnieje - najpierw 'init'."); return 1; }
+        using var c = Db.Open(key, create: false);
+        Db.EnsureSchema(c);
+        IReadOnlyList<GmailAccountRecord> accounts = selector is null
+            ? GmailRepository.ListAccounts(c)
+            : GmailRepository.FindAccount(c, selector) is { } selected ? [selected] : Array.Empty<GmailAccountRecord>();
+        if (accounts.Count == 0) { Console.Error.WriteLine("Brak pasujacego konta Gmail."); return 1; }
+        foreach (GmailAccountRecord account in accounts) GmailCancellation.Request(account.Id);
+        Console.WriteLine($"Zgloszono anulowanie synchronizacji Gmail: {string.Join(", ", accounts.Select(a => a.Email))}.");
         return 0;
     }
 
@@ -579,14 +591,14 @@ static class Cli
 
     static int GmailHelp()
     {
-        Console.WriteLine("Uzycie: gmail sync [--account <id|adres>] [--full] | gmail status [--account <id|adres>] | gmail cancel");
+        Console.WriteLine("Uzycie: gmail sync [--account <id|adres>] [--full] | gmail status [--account <id|adres>] | gmail cancel [--account <id|adres>]");
         return 1;
     }
 
     static int RunCancelable(Func<CancellationToken, Task<int>> action)
     {
         using var source = new CancellationTokenSource();
-        ConsoleCancelEventHandler handler = (_, e) => { e.Cancel = true; source.Cancel(); GmailCancellation.Request(); };
+        ConsoleCancelEventHandler handler = (_, e) => { e.Cancel = true; source.Cancel(); };
         Console.CancelKeyPress += handler;
         try { return action(source.Token).GetAwaiter().GetResult(); }
         catch (OperationCanceledException) { Console.Error.WriteLine("Operacja anulowana."); return 130; }

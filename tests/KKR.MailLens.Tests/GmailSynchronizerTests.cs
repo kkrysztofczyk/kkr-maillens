@@ -7,10 +7,10 @@ namespace KKR.MailLens.Tests;
 public sealed class GmailSynchronizerTests
 {
     [TestInitialize]
-    public void Initialize() => GmailCancellation.Clear();
+    public void Initialize() => GmailCancellation.ClearAll();
 
     [TestCleanup]
-    public void Cleanup() => GmailCancellation.Clear();
+    public void Cleanup() => GmailCancellation.ClearAll();
 
     [TestMethod]
     public async Task InitialSync_ImportsPagesAndIndexesOffline()
@@ -294,6 +294,95 @@ public sealed class GmailSynchronizerTests
         Assert.AreEqual(2, GmailRepository.MessageCount(db.Connection, account.Id));
         Assert.AreEqual(1, GmailRepository.RetryCount(db.Connection, account.Id));
         Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM messages WHERE gmail_message_id='m1';"));
+    }
+
+    [TestMethod]
+    public async Task HttpTimeoutForSingleMessage_IsRecordedAndDoesNotAbortSync()
+    {
+        using var db = new TestDatabase();
+        GmailAccountRecord account = db.AddAccount();
+        using var api = new FakeGmailApiClient();
+        api.Messages["good"] = GmailTestMessage.Create("good");
+        api.MessageErrors["timeout"] = new TaskCanceledException("neutral http timeout");
+        api.MessagePages[""] = () => new GmailMessagePage(["good", "timeout"], null);
+        api.HistoryPages.Enqueue(() => new GmailHistoryPage([], [], "101", null));
+
+        GmailSyncResult result = await new GmailSynchronizer(db.Connection, api)
+            .SyncAsync(account, false, CancellationToken.None);
+
+        Assert.AreEqual(1, result.Errors);
+        Assert.AreEqual(1, GmailRepository.MessageCount(db.Connection, account.Id));
+        Assert.AreEqual(1, GmailRepository.RetryCount(db.Connection, account.Id));
+        Assert.IsTrue(GmailRepository.FindAccount(db.Connection, account.Id)!.InitialSyncCompleted);
+    }
+
+    [TestMethod]
+    public async Task CancelFlagForSyncedAccount_AbortsSyncDuringMessageFetch()
+    {
+        using var db = new TestDatabase();
+        GmailAccountRecord account = db.AddAccount();
+        using var api = new FakeGmailApiClient();
+        api.Messages["m1"] = GmailTestMessage.Create("m1");
+        api.MessagePages[""] = () =>
+        {
+            GmailCancellation.Request(account.Id);
+            return new GmailMessagePage(["m1"], null);
+        };
+
+        await Assert.ThrowsExactlyAsync<OperationCanceledException>(async () =>
+            await new GmailSynchronizer(db.Connection, api).SyncAsync(account, false, CancellationToken.None));
+        Assert.AreEqual(0, GmailRepository.MessageCount(db.Connection, account.Id));
+    }
+
+    [TestMethod]
+    public async Task CancelFlagForOtherAccount_DoesNotAffectSync()
+    {
+        using var db = new TestDatabase();
+        GmailAccountRecord account = db.AddAccount();
+        GmailAccountRecord other = db.AddAccount("other@example.invalid");
+        GmailCancellation.Request(other.Id);
+
+        using var api = new FakeGmailApiClient();
+        api.Messages["m1"] = GmailTestMessage.Create("m1");
+        api.MessagePages[""] = () => new GmailMessagePage(["m1"], null);
+        api.HistoryPages.Enqueue(() => new GmailHistoryPage([], [], "101", null));
+
+        GmailSyncResult result = await new GmailSynchronizer(db.Connection, api)
+            .SyncAsync(account, false, CancellationToken.None);
+
+        Assert.AreEqual(1, result.Inserted);
+        Assert.IsTrue(GmailRepository.FindAccount(db.Connection, account.Id)!.InitialSyncCompleted);
+        Assert.IsTrue(GmailCancellation.IsRequested(other.Id));
+    }
+
+    [TestMethod]
+    public async Task CorruptMessageBody_IsSavedWithVisibleDecodeError()
+    {
+        using var db = new TestDatabase();
+        GmailAccountRecord account = db.AddAccount();
+        using var api = new FakeGmailApiClient();
+        api.Messages["m1"] = GmailTestMessage.Create("m1", extraParts:
+        [
+            new GmailApiPart
+            {
+                PartId = "9",
+                MimeType = "text/plain",
+                Data = "!!!niepoprawne-base64###",
+                Headers = [new GmailHeader("Content-Type", "text/plain; charset=utf-8")],
+            },
+        ]);
+        api.MessagePages[""] = () => new GmailMessagePage(["m1"], null);
+        api.HistoryPages.Enqueue(() => new GmailHistoryPage([], [], "101", null));
+
+        GmailSyncResult result = await new GmailSynchronizer(db.Connection, api)
+            .SyncAsync(account, false, CancellationToken.None);
+
+        Assert.AreEqual(1, result.Inserted);
+        Assert.AreEqual(1, result.Errors);
+        Assert.AreEqual(1, GmailRepository.MessageCount(db.Connection, account.Id));
+        Assert.AreEqual(0, GmailRepository.RetryCount(db.Connection, account.Id));
+        Assert.AreEqual(1, db.ScalarLong(
+            "SELECT count(*) FROM sync_errors WHERE stage='decode' AND gmail_message_id='m1';"));
     }
 
     [TestMethod]

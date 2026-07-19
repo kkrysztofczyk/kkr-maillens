@@ -41,6 +41,7 @@ sealed class GmailManagerForm : Form
     readonly System.Windows.Forms.Timer _sessionTimer = new() { Interval = 1000 };
     CancellationTokenSource? _operation;
     bool _gmailOperation;
+    long[] _gmailSyncAccounts = [];
 
     public GmailManagerForm(Func<string?> keyProvider)
     {
@@ -175,7 +176,6 @@ sealed class GmailManagerForm : Form
         await RunOperation(full ? "Pełna synchronizacja Gmail…" : "Synchronizacja Gmail…",
             async (key, cancellationToken) => await Task.Run(async () =>
             {
-                GmailCancellation.Clear();
                 try
                 {
                     using var connection = Db.Open(key, create: false);
@@ -185,6 +185,8 @@ sealed class GmailManagerForm : Form
                         : GmailRepository.FindAccount(connection, selectedId.Value) is { } selected
                             ? [selected] : [];
                     if (accounts.Count == 0) throw new InvalidOperationException("Brak konta do synchronizacji.");
+                    _gmailSyncAccounts = accounts.Select(account => account.Id).ToArray();
+                    foreach (long accountId in _gmailSyncAccounts) GmailCancellation.Clear(accountId);
 
                     long processed = 0, inserted = 0, updated = 0, deleted = 0, errors = 0;
                     foreach (GmailAccountRecord account in accounts)
@@ -204,7 +206,11 @@ sealed class GmailManagerForm : Form
                     return $"Synchronizacja zakończona: przetworzono={processed}, nowe={inserted}, "
                         + $"aktualizacje={updated}, usunięte={deleted}, błędy={errors}.";
                 }
-                finally { GmailCancellation.Clear(); }
+                finally
+                {
+                    foreach (long accountId in _gmailSyncAccounts) GmailCancellation.Clear(accountId);
+                    _gmailSyncAccounts = [];
+                }
             }, cancellationToken), gmailOperation: true);
     }
 
@@ -300,7 +306,8 @@ sealed class GmailManagerForm : Form
 
     void CancelOperation()
     {
-        if (_gmailOperation) GmailCancellation.Request();
+        if (_gmailOperation)
+            foreach (long accountId in _gmailSyncAccounts) GmailCancellation.Request(accountId);
         _operation?.Cancel();
         _status.Text = "Anulowanie operacji…";
     }

@@ -139,6 +139,55 @@ public sealed class GmailMessageMapperTests
     }
 
     [TestMethod]
+    public void Map_CorruptBase64Body_ReportsDecodeErrorInsteadOfSilentLoss()
+    {
+        var source = GmailTestMessage.Create("m8", body: "Poprawny tekst", extraParts:
+        [
+            new GmailApiPart
+            {
+                PartId = "9",
+                MimeType = "text/plain",
+                Data = "!!!niepoprawne-base64###",
+                Headers = [new("Content-Type", "text/plain; charset=utf-8")],
+            },
+        ]);
+        GmailStoredMessage result = GmailMessageMapper.Map(source, 1);
+
+        Assert.AreEqual("Poprawny tekst", result.BodyText);
+        CollectionAssert.AreEqual(new[] { "9" }, result.BodyDecodeErrors.ToArray());
+    }
+
+    [TestMethod]
+    public void Map_DateHeaderWithoutOffset_IsTreatedAsUtc()
+    {
+        GmailStoredMessage withoutOffset = GmailMessageMapper.Map(WithDateHeader("m9", "Tue, 14 Nov 2023 22:13:20"), 1);
+        GmailStoredMessage withOffset = GmailMessageMapper.Map(WithDateHeader("m10", "Tue, 14 Nov 2023 23:13:20 +0100"), 1);
+
+        Assert.AreEqual("2023-11-14 22:13:20", withoutOffset.SentAt);
+        Assert.AreEqual("2023-11-14 22:13:20", withOffset.SentAt);
+    }
+
+    static GmailApiMessage WithDateHeader(string id, string date)
+    {
+        GmailApiMessage original = GmailTestMessage.Create(id);
+        return new GmailApiMessage
+        {
+            Id = original.Id,
+            ThreadId = original.ThreadId,
+            InternalDateUnixMs = original.InternalDateUnixMs,
+            SizeEstimate = original.SizeEstimate,
+            LabelIds = original.LabelIds,
+            Payload = new GmailApiPart
+            {
+                MimeType = original.Payload.MimeType,
+                Headers = original.Payload.Headers.Select(x => x.Name == "Date"
+                    ? new GmailHeader("Date", date) : x).ToArray(),
+                Parts = original.Payload.Parts,
+            },
+        };
+    }
+
+    [TestMethod]
     public void Map_MessageWithoutTextBody_IsStillSaved()
     {
         GmailApiMessage original = GmailTestMessage.Create("m7");

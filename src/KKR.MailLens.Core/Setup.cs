@@ -83,7 +83,7 @@ static class Setup
     static void PurgeDataBoundToPreviousCorpus()
     {
         DeleteFileIfExists(Paths.ImapAccountsFile);
-        DeleteFileIfExists(Paths.GmailCancelFile);
+        GmailCancellation.ClearAll();
         DeleteDirectoryIfExists(Paths.GmailTokensDir);
         DeleteDirectoryIfExists(Paths.BlobsDir);
         DeleteDirectoryIfExists(Paths.TempDir);

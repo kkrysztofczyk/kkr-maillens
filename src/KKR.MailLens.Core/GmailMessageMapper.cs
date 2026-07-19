@@ -21,7 +21,8 @@ static partial class GmailMessageMapper
         var plain = new List<string>();
         var html = new List<string>();
         var attachments = new List<GmailAttachmentRecord>();
-        bool depthExceeded = Visit(source.Payload, plain, html, attachments, depth: 0);
+        var decodeErrors = new List<string>();
+        bool depthExceeded = Visit(source.Payload, plain, html, attachments, decodeErrors, depth: 0);
 
         string bodyHtml = JoinBodies(html);
         string bodyText = JoinBodies(plain);
@@ -53,6 +54,7 @@ static partial class GmailMessageMapper
             SizeBytes = Math.Max(0, source.SizeEstimate),
             LabelIds = source.LabelIds.Distinct(StringComparer.Ordinal).ToArray(),
             Attachments = attachments,
+            BodyDecodeErrors = decodeErrors,
         };
     }
 
@@ -195,7 +197,8 @@ static partial class GmailMessageMapper
         return html.Length;
     }
 
-    static bool Visit(GmailApiPart part, List<string> plain, List<string> html, List<GmailAttachmentRecord> attachments, int depth)
+    static bool Visit(GmailApiPart part, List<string> plain, List<string> html, List<GmailAttachmentRecord> attachments,
+        List<string> decodeErrors, int depth)
     {
         string mime = (part.MimeType ?? "application/octet-stream").Trim().ToLowerInvariant();
         bool namedAttachment = !string.IsNullOrWhiteSpace(part.Filename);
@@ -216,22 +219,23 @@ static partial class GmailMessageMapper
 
         if (!namedAttachment && mime == "text/plain" && !string.IsNullOrEmpty(part.Data))
         {
-            string text = DecodePartText(part);
-            if (text.Length > 0) plain.Add(text);
+            if (DecodePartText(part) is { } text) { if (text.Length > 0) plain.Add(text); }
+            else decodeErrors.Add(part.PartId ?? "");
         }
         else if (!namedAttachment && mime == "text/html" && !string.IsNullOrEmpty(part.Data))
         {
-            string text = DecodePartText(part);
-            if (text.Length > 0) html.Add(text);
+            if (DecodePartText(part) is { } text) { if (text.Length > 0) html.Add(text); }
+            else decodeErrors.Add(part.PartId ?? "");
         }
 
         if (depth >= MaxMimePartDepth) return part.Parts.Count > 0;
         bool truncated = false;
-        foreach (var child in part.Parts) truncated |= Visit(child, plain, html, attachments, depth + 1);
+        foreach (var child in part.Parts) truncated |= Visit(child, plain, html, attachments, decodeErrors, depth + 1);
         return truncated;
     }
 
-    static string DecodePartText(GmailApiPart part)
+    // null = treść nie do odzyskania (np. uszkodzone Base64URL); wywołujący raportuje utratę.
+    static string? DecodePartText(GmailApiPart part)
     {
         try
         {
@@ -243,7 +247,7 @@ static partial class GmailMessageMapper
             catch { encoding = Encoding.UTF8; }
             return encoding.GetString(bytes).Trim();
         }
-        catch { return ""; }
+        catch { return null; }
     }
 
     static string Header(GmailApiPart payload, string name)
@@ -309,8 +313,10 @@ static partial class GmailMessageMapper
         catch { return ""; }
     }
 
+    // AssumeUniversal: nagłówek Date bez strefy nie może zależeć od strefy hosta.
     static string ParseHeaderDate(string value) =>
-        DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var date)
+        DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture,
+            DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.AssumeUniversal, out var date)
             ? date.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
             : "";
 
