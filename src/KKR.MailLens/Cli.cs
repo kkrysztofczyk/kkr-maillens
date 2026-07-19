@@ -48,73 +48,12 @@ static class Cli
     public static int Config(string[] args)
     {
         var cfg = AppConfig.Load();
-        bool changed = false;
-        if (GetStr(args, "--store") is { } s) { cfg.StoreFilter = s.Trim(); changed = true; }
-        if (GetStr(args, "--max") is { } mx && int.TryParse(mx, out var m)) { cfg.MaxPerFolder = m; changed = true; }
-        if (GetStr(args, "--tesseract") is { } tess) { cfg.TesseractPath = tess.Trim(); changed = true; }
-        if (GetStr(args, "--ocr-languages") is { } languages) { cfg.OcrLanguages = languages.Trim(); changed = true; }
-        if (GetStr(args, "--ocr-timeout") is { } timeout && int.TryParse(timeout, out int seconds))
-        { cfg.OcrTimeoutSeconds = Math.Clamp(seconds, 10, 3600); changed = true; }
-        if (GetStr(args, "--ocr-pdf-dpi") is { } dpi && int.TryParse(dpi, out int dpiValue))
-        { cfg.OcrPdfDpi = Math.Clamp(dpiValue, 72, 600); changed = true; }
-        if (GetStr(args, "--ocr-max-pdf-pages") is { } pages && int.TryParse(pages, out int pageCount))
-        { cfg.OcrMaxPdfPages = Math.Clamp(pageCount, 1, 10_000); changed = true; }
-        if (GetStr(args, "--ocr-pdf-render-timeout") is { } renderTimeout
-            && int.TryParse(renderTimeout, out int renderSeconds))
-        { cfg.OcrPdfRenderTimeoutSeconds = Math.Clamp(renderSeconds, 10, 3600); changed = true; }
-        if (GetStr(args, "--ocr-pdf-batch-size") is { } batchSize
-            && int.TryParse(batchSize, out int batchPages))
-        { cfg.OcrPdfBatchSize = Math.Clamp(batchPages, 1, 16); changed = true; }
-        if (GetStr(args, "--paddleocr-enabled") is { } paddleEnabled
-            && bool.TryParse(paddleEnabled, out bool usePaddle))
-        { cfg.PaddleOcrEnabled = usePaddle; changed = true; }
-        if (GetStr(args, "--paddleocr-python") is { } paddlePython)
-        { cfg.PaddleOcrPythonPath = paddlePython.Trim(); changed = true; }
-        if (GetStr(args, "--paddleocr-runner") is { } paddleRunner)
-        { cfg.PaddleOcrRunnerPath = paddleRunner.Trim(); changed = true; }
-        if (GetStr(args, "--paddleocr-language") is { } paddleLanguage)
-        { cfg.PaddleOcrLanguage = paddleLanguage.Trim(); changed = true; }
-        if (GetStr(args, "--paddleocr-version") is { } paddleVersion)
-        { cfg.PaddleOcrModelVersion = paddleVersion.Trim(); changed = true; }
-        if (GetStr(args, "--paddleocr-device") is { } paddleDevice)
-        { cfg.PaddleOcrDevice = paddleDevice.Trim(); changed = true; }
-        if (GetStr(args, "--paddleocr-min-confidence") is { } paddleConfidence
-            && double.TryParse(paddleConfidence, System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out double minimumConfidence))
-        { cfg.PaddleOcrMinimumConfidence = Math.Clamp(minimumConfidence, 0, 1); changed = true; }
-        if (GetStr(args, "--paddleocr-timeout") is { } paddleTimeout
-            && int.TryParse(paddleTimeout, out int paddleSeconds))
-        { cfg.PaddleOcrTimeoutSeconds = Math.Clamp(paddleSeconds, 10, 3600); changed = true; }
-        if (GetStr(args, "--worker-memory-mb") is { } workerMemory
-            && int.TryParse(workerMemory, out int memoryMb))
-        { cfg.WorkerMemoryLimitMb = Math.Clamp(memoryMb, 256, 16_384); changed = true; }
-        if (GetStr(args, "--ffmpeg") is { } ffmpeg) { cfg.FfmpegPath = ffmpeg.Trim(); changed = true; }
-        if (GetStr(args, "--whisper") is { } whisper) { cfg.WhisperPath = whisper.Trim(); changed = true; }
-        if (GetStr(args, "--whisper-model") is { } model) { cfg.WhisperModelPath = model.Trim(); changed = true; }
-        if (GetStr(args, "--whisper-fallback-model") is { } fallbackModel)
-        { cfg.WhisperFallbackModelPath = fallbackModel.Trim(); changed = true; }
-        if (GetStr(args, "--whisper-language") is { } language) { cfg.WhisperLanguage = language.Trim(); changed = true; }
-        if (GetStr(args, "--ffmpeg-timeout") is { } ffmpegTimeout && int.TryParse(ffmpegTimeout, out int ffmpegSeconds))
-        { cfg.FfmpegTimeoutSeconds = Math.Clamp(ffmpegSeconds, 10, 3600); changed = true; }
-        if (GetStr(args, "--whisper-timeout") is { } whisperTimeout && int.TryParse(whisperTimeout, out int whisperSeconds))
-        { cfg.WhisperTimeoutSeconds = Math.Clamp(whisperSeconds, 30, 24 * 3600); changed = true; }
-        if (GetStr(args, "--transcription-max-minutes") is { } duration && int.TryParse(duration, out int minutes))
-        { cfg.TranscriptionMaxMinutes = Math.Clamp(minutes, 1, 24 * 60); changed = true; }
-        if (GetStr(args, "--semantic-enabled") is { } semantic && bool.TryParse(semantic, out bool enabled))
-        { cfg.SemanticEnabled = enabled; changed = true; }
-        if (GetStr(args, "--embedding-endpoint") is { } endpoint)
-        { cfg.EmbeddingEndpoint = endpoint.Trim(); changed = true; }
-        if (GetStr(args, "--embedding-model") is { } embeddingModel)
-        { cfg.EmbeddingModel = embeddingModel.Trim(); changed = true; }
-        if (GetStr(args, "--embedding-batch-size") is { } embeddingBatch
-            && int.TryParse(embeddingBatch, out int embeddingBatchSize))
-        { cfg.EmbeddingBatchSize = Math.Clamp(embeddingBatchSize, 1, 64); changed = true; }
-        if (GetStr(args, "--embedding-timeout") is { } embeddingTimeout
-            && int.TryParse(embeddingTimeout, out int embeddingTimeoutSeconds))
-        { cfg.EmbeddingTimeoutSeconds = Math.Clamp(embeddingTimeoutSeconds, 10, 3600); changed = true; }
-        if (GetStr(args, "--semantic-max-candidates") is { } candidates
-            && int.TryParse(candidates, out int maxCandidates))
-        { cfg.SemanticMaxCandidates = Math.Clamp(maxCandidates, 100, 250_000); changed = true; }
+        var (changed, errors) = ConfigOptions.Apply(cfg, args);
+        if (errors.Count > 0)
+        {
+            foreach (string error in errors) Console.Error.WriteLine(error);
+            return 1;
+        }
         if (cfg.SemanticEnabled)
         {
             try
@@ -370,7 +309,7 @@ static class Cli
         {
             "sync" => GmailSync(args),
             "status" => GmailStatus(args),
-            "cancel" => GmailCancel(),
+            "cancel" => GmailCancel(args),
             _ => GmailHelp(),
         };
     }
@@ -426,20 +365,20 @@ static class Cli
 
         return RunCancelable(async cancellationToken =>
         {
-            GmailCancellation.Clear();
+            using var c = Db.Open(key, create: false);
+            Db.EnsureSchema(c);
+            IReadOnlyList<GmailAccountRecord> accounts = selector is null
+                ? GmailRepository.ListAccounts(c)
+                : GmailRepository.FindAccount(c, selector) is { } selected ? [selected] : Array.Empty<GmailAccountRecord>();
+            if (accounts.Count == 0) { Console.Error.WriteLine("Brak pasujacego konta. Uzyj 'account add gmail'."); return 1; }
+
+            foreach (GmailAccountRecord account in accounts) GmailCancellation.Clear(account.Id);
             try
             {
-                using var c = Db.Open(key, create: false);
-                Db.EnsureSchema(c);
-                IReadOnlyList<GmailAccountRecord> accounts = selector is null
-                    ? GmailRepository.ListAccounts(c)
-                    : GmailRepository.FindAccount(c, selector) is { } selected ? [selected] : Array.Empty<GmailAccountRecord>();
-                if (accounts.Count == 0) { Console.Error.WriteLine("Brak pasujacego konta. Uzyj 'account add gmail'."); return 1; }
-
                 int exit = 0;
                 foreach (GmailAccountRecord account in accounts)
                 {
-                    GmailCancellation.ThrowIfRequested(cancellationToken);
+                    GmailCancellation.ThrowIfRequested(account.Id, cancellationToken);
                     Console.WriteLine($"Gmail sync: {account.Email} ({(full ? "pelna" : "automatyczna")}).");
                     try
                     {
@@ -459,7 +398,10 @@ static class Cli
                 }
                 return exit;
             }
-            finally { GmailCancellation.Clear(); }
+            finally
+            {
+                foreach (GmailAccountRecord account in accounts) GmailCancellation.Clear(account.Id);
+            }
         });
     }
 
@@ -487,10 +429,19 @@ static class Cli
         return 0;
     }
 
-    static int GmailCancel()
+    static int GmailCancel(string[] args)
     {
-        GmailCancellation.Request();
-        Console.WriteLine("Zgloszono anulowanie synchronizacji Gmail.");
+        string? key = RequireKey(); if (key is null) return 2;
+        string? selector = GetStr(args, "--account");
+        if (!File.Exists(Paths.CorpusDb)) { Console.Error.WriteLine("Korpus nie istnieje - najpierw 'init'."); return 1; }
+        using var c = Db.Open(key, create: false);
+        Db.EnsureSchema(c);
+        IReadOnlyList<GmailAccountRecord> accounts = selector is null
+            ? GmailRepository.ListAccounts(c)
+            : GmailRepository.FindAccount(c, selector) is { } selected ? [selected] : Array.Empty<GmailAccountRecord>();
+        if (accounts.Count == 0) { Console.Error.WriteLine("Brak pasujacego konta Gmail."); return 1; }
+        foreach (GmailAccountRecord account in accounts) GmailCancellation.Request(account.Id);
+        Console.WriteLine($"Zgloszono anulowanie synchronizacji Gmail: {string.Join(", ", accounts.Select(a => a.Email))}.");
         return 0;
     }
 
@@ -566,8 +517,10 @@ static class Cli
                 Console.WriteLine($"    {SemanticLocation(hit)}{hit.Filename}");
                 if (hit.Snippet.Length > 0) Console.WriteLine($"    | {hit.Snippet}");
             }
+            if (result.DimensionMismatch)
+                Console.WriteLine($"UWAGA: wymiary embeddingów nie pasują (indeks: {result.IndexedDimensions}, zapytanie: {result.QueryDimensions}) — uruchom semantic-index --rebuild.");
             if (result.CandidateLimitReached)
-                Console.WriteLine($"UWAGA: ranking semantyczny ograniczono do {config.SemanticMaxCandidates} najnowszych segmentów.");
+                Console.WriteLine($"UWAGA: ranking semantyczny ograniczono do {config.SemanticMaxCandidates} najnowszych segmentów. Zwiększ config --semantic-max-candidates lub zawęź zapytanie.");
             Console.WriteLine(result.Hits.Count == 0
                 ? $"(brak trafień; embeddingi modelu: {result.IndexedVectors})"
                 : $"-- {result.Hits.Count} trafień; embeddingi modelu: {result.IndexedVectors}");
@@ -607,8 +560,21 @@ static class Cli
         {
             using RestrictedWorkerProcess worker = RestrictedWorkerProcess.Start(executable,
                 Flag(args, "--once") ? "" : "--drain", memoryLimitMb * 1024L * 1024L);
-            worker.Process.WaitForExit();
-            return worker.Process.ExitCode;
+            int stopRequests = 0;
+            ConsoleCancelEventHandler onCancel = (_, e) =>
+            {
+                // Pierwszy Ctrl+C: łagodne zatrzymanie (Worker oddaje zadanie i kończy się sam).
+                // Kolejny: pozwól ubić CLI — zamknięcie job object zabierze ze sobą Workera.
+                e.Cancel = Interlocked.Increment(ref stopRequests) == 1;
+                worker.RequestStop();
+            };
+            Console.CancelKeyPress += onCancel;
+            try
+            {
+                worker.Process.WaitForExit();
+                return worker.Process.ExitCode;
+            }
+            finally { Console.CancelKeyPress -= onCancel; }
         }
         catch (Exception ex) when (ex is Win32Exception or PlatformNotSupportedException)
         {
@@ -625,14 +591,14 @@ static class Cli
 
     static int GmailHelp()
     {
-        Console.WriteLine("Uzycie: gmail sync [--account <id|adres>] [--full] | gmail status [--account <id|adres>] | gmail cancel");
+        Console.WriteLine("Uzycie: gmail sync [--account <id|adres>] [--full] | gmail status [--account <id|adres>] | gmail cancel [--account <id|adres>]");
         return 1;
     }
 
     static int RunCancelable(Func<CancellationToken, Task<int>> action)
     {
         using var source = new CancellationTokenSource();
-        ConsoleCancelEventHandler handler = (_, e) => { e.Cancel = true; source.Cancel(); GmailCancellation.Request(); };
+        ConsoleCancelEventHandler handler = (_, e) => { e.Cancel = true; source.Cancel(); };
         Console.CancelKeyPress += handler;
         try { return action(source.Token).GetAwaiter().GetResult(); }
         catch (OperationCanceledException) { Console.Error.WriteLine("Operacja anulowana."); return 130; }

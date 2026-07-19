@@ -11,6 +11,20 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 
 ## Status bieżący
 
+### Otwarte (do naprawy)
+
+- **Restart pełnej synchronizacji Gmail po wygaśnięciu page tokenu.** W `GmailSynchronizer.FullSync`
+  gałąź `catch (GmailPageTokenExpiredException)` ustawia `pageToken = null` i wywołuje `continue`
+  w pętli `do { … } while (!string.IsNullOrEmpty(pageToken))`. `continue` skacze do warunku pętli,
+  który po wyzerowaniu tokenu jest fałszywy, więc pętla kończy się bez ponownego pobrania stron.
+  Ponieważ `BeginFullSync(reset: true)` zdążył podbić generację, `PruneMissingMessages` usuwa cały
+  korpus nowej generacji, a `CompleteFullSync` raportuje sukces — wygaśnięcie tokenu w połowie
+  synchronizacji po cichu kasuje skrzynkę. Test regresyjny istnieje i jest wyłączony do czasu naprawy:
+  `GmailSynchronizerTests.ExpiredPageToken_RestartsFullSyncWithoutSkippingOrDuplicatingMessages`
+  (atrybut `[Ignore]`). Sugerowana naprawa: przebudować pętlę tak, aby restart ponownie wchodził
+  w ciało (np. `while (true)` z jawnym `break`, albo flaga `restart`), zachowując semantykę resetu.
+  Po naprawie zdjąć `[Ignore]`.
+
 ### Zamknięte lub nieaktualne
 
 - SDK 9.0.316 jest zainstalowane i zgodne z `global.json`.
@@ -46,6 +60,9 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Bezpośrednie uruchomienie Workera jest odrzucane, jeżeli proces nie ma ograniczonego tokenu.
 - Ctrl+C i utrata odblokowanej sesji anulują operacje zewnętrzne; zadanie wraca do kolejki bez zużycia próby.
 - Wszystkie typy zadań Workera mają niezależny heartbeat dzierżawy; utrata własności anuluje pracę, a ekstrakcja sprawdza ją ponownie przed zapisem wyniku.
+- Anulowanie Workera z GUI i pierwszy Ctrl+C w CLI wysyłają nazwany sygnał zatrzymania zamiast zabijać job object; Worker oddaje zadanie przez `Abandon`, a zamknięcie job object pozostaje awaryjnym domknięciem po okresie łaski.
+- `RetryFailed` pomija wiersze kolidujące z aktywnym duplikatem oraz przywraca tylko najnowszy z failed-duplikatów, więc masowy retry nie wycofuje się w całości przez `ux_processing_jobs_active_attachment`.
+- Monitor sesji Workera odróżnia jawne `LOCKED` od braku odpowiedzi agenta; chwilowo zajęte GUI (do ~15 s ciszy) nie wywołuje już fałszywego zamknięcia.
 - Harvest Outlooka w GUI reaguje na ręczną blokadę, wyjęcie YubiKey, wygaśnięcie TTL i blokadę przez IPC; przerwana partia korpusu jest wycofywana transakcyjnie.
 - Odzyskanie wygasłego lease zachowuje wcześniejszy kod diagnostyczny, jeżeli zadanie już go miało.
 - Działa lokalny pipeline FFmpeg → whisper.cpp z timestampami segmentów, FTS5 i sprzątaniem jawnych plików roboczych.
@@ -63,4 +80,7 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Powtarzanie metadanych wiadomości przy segmentach FTS5 pozostaje świadomym kompromisem bieżącego schematu; daje prosty, odtwarzalny ranking kosztem większego indeksu.
 - Polityka uwierzytelnienia pozostaje jawna: niepusty PIN jest dozwolony dla zgodności, a dokumentacja zaleca długą frazę lub `PIN + YubiKey`; gest dotyku zależy od konfiguracji slotu urządzenia.
 - CLI przyjmuje PIN i hasło IMAP wyłącznie interaktywnie albo przez `stdin`; test YubiKey używa losowego wyzwania i nie wypisuje odpowiedzi, a konto Gmail jest utrwalane dopiero po potwierdzeniu refresh tokenu OAuth.
-- Zestaw testów wzrósł z historycznych 20/31 do 118 testów.
+- Wszystkie źródła zapisują `received`/`sent` w UTC (Gmail już wcześniej; Outlook `DateStr` konwertuje czas lokalny COM, IMAP formatuje `UtcDateTime`), więc filtry dat, `ORDER BY received` i okno kandydatów wyszukiwania semantycznego leżą na jednej osi czasu.
+  - Kompromis cutover: świadomie **bez** migracji istniejących wierszy — per-wierszowy offset strefy jest nieznany, więc jednorazowa konwersja jest niewykonalna. Historyczne rekordy Outlook/IMAP zachowują czas lokalny do najbliższego harvestu tej samej wiadomości; upsert po stabilnej tożsamości źródłowej naprawia je przy kolejnym pobraniu. Odrzucono dodatkową znormalizowaną kolumnę jako nadmiarową wobec self-healing przez re-harvest.
+- Filtry `query`: `--from`/`--to` są walidowane (`yyyy-MM-dd` lub `yyyy-MM-dd HH:mm[:ss]`), górna granica całego dnia to data+1 (wykluczająca), a `--sender`/`--folder` escapują `%` `_` `\` z klauzulą `ESCAPE '\'`; pierwszy pozycyjny argument nie jest zjadany przez nieznane flagi, a separator `--` przekazuje frazę zaczynającą się od `--` (tak robi GUI).
+- Zestaw testów wzrósł z historycznych 20/31 do 172 testów.

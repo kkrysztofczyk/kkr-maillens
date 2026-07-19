@@ -6,7 +6,9 @@ namespace KKR.MailLens.Tests;
 
 sealed class TestDatabase : IDisposable
 {
+    static readonly string Key = new('A', 64);
     readonly string _directory;
+    readonly string _path;
     public SqliteConnection Connection { get; }
 
     static TestDatabase() => SQLitePCL.Batteries_V2.Init();
@@ -15,10 +17,13 @@ sealed class TestDatabase : IDisposable
     {
         _directory = Path.Combine(Path.GetTempPath(), "kkr-maillens-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_directory);
-        string path = Path.Combine(_directory, "test.db");
-        Connection = Db.Open(new string('A', 64), create: true, path: path);
+        _path = Path.Combine(_directory, "test.db");
+        Connection = Db.Open(Key, create: true, path: _path);
         Db.EnsureSchema(Connection);
     }
+
+    /// <summary>Osobne połączenie do tej samej bazy — jak połączenie heartbeatu w Workerze.</summary>
+    public SqliteConnection OpenAnotherConnection() => Db.Open(Key, create: false, path: _path);
 
     public GmailAccountRecord AddAccount(string email = "sender@example.invalid") =>
         GmailRepository.UpsertAccount(Connection, email, email, "token-" + Guid.NewGuid().ToString("N"));
@@ -60,6 +65,7 @@ sealed class FakeGmailApiClient : IGmailApiClient
     public Dictionary<string, Func<GmailMessagePage>> MessagePages { get; } = new(StringComparer.Ordinal);
     public Queue<Func<GmailHistoryPage>> HistoryPages { get; } = new();
     public List<string?> RequestedPageTokens { get; } = new();
+    public List<(string StartHistoryId, string? PageToken)> HistoryRequests { get; } = new();
 
     public Task<GmailProfile> GetProfileAsync(CancellationToken cancellationToken)
     { cancellationToken.ThrowIfCancellationRequested(); return Task.FromResult(Profile); }
@@ -92,6 +98,7 @@ sealed class FakeGmailApiClient : IGmailApiClient
     public Task<GmailHistoryPage> ListHistoryAsync(string startHistoryId, string? pageToken, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        HistoryRequests.Add((startHistoryId, pageToken));
         if (HistoryPages.Count == 0) return Task.FromResult(new GmailHistoryPage(Array.Empty<string>(), Array.Empty<string>(), startHistoryId, null));
         return Task.FromResult(HistoryPages.Dequeue()());
     }

@@ -32,6 +32,24 @@ public sealed class ImapAttachmentTests
     }
 
     [TestMethod]
+    public void MessageIdCandidate_AcceptsOnlyRealMessageIds()
+    {
+        Assert.AreEqual("abc@example.invalid",
+            ImapAttachmentDownloader.MessageIdCandidate(Item("abc@example.invalid")));
+        Assert.AreEqual("abc@example.invalid",
+            ImapAttachmentDownloader.MessageIdCandidate(Item(" <abc@example.invalid> ")));
+        // syntetyczne entry_id (brak Message-Id) i hasze source-identity nie nadaja sie do SEARCH
+        Assert.IsNull(ImapAttachmentDownloader.MessageIdCandidate(Item("imap:test-account:INBOX:81")));
+        Assert.IsNull(ImapAttachmentDownloader.MessageIdCandidate(Item("imap:" + new string('a', 64))));
+        Assert.IsNull(ImapAttachmentDownloader.MessageIdCandidate(Item("")));
+
+        static MailAttachmentRepository.Item Item(string mailEntryId) => new(1, mailEntryId, "imap",
+            new ImapMessageLocator("test-account", "INBOX", 42, 81).Encode(),
+            "2", new ImapPartLocator("2", "base64").Encode(), "record.txt", "text/plain", 64, "",
+            false, null, null);
+    }
+
+    [TestMethod]
     public void CorpusUpsert_QueuesImapAttachmentAndPreservesUnchangedContent()
     {
         using var db = new TestDatabase();

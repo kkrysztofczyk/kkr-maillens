@@ -7,6 +7,11 @@ namespace KKR.MailLens;
 
 static partial class GmailMessageMapper
 {
+    // Limit glebokosci zagniezdzenia czesci MIME chroniacy stos przed wrogimi wiadomosciami.
+    internal const int MaxMimePartDepth = 100;
+    const int MaxHtmlLength = 2_000_000;
+    const string DepthTruncationNotice = "[Pominięto zbyt głęboko zagnieżdżone części wiadomości.]";
+
     static GmailMessageMapper() => Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
     public static GmailStoredMessage Map(GmailApiMessage source, long accountId)
@@ -16,11 +21,13 @@ static partial class GmailMessageMapper
         var plain = new List<string>();
         var html = new List<string>();
         var attachments = new List<GmailAttachmentRecord>();
-        Visit(source.Payload, plain, html, attachments);
+        var decodeErrors = new List<string>();
+        bool depthExceeded = Visit(source.Payload, plain, html, attachments, decodeErrors, depth: 0);
 
         string bodyHtml = JoinBodies(html);
         string bodyText = JoinBodies(plain);
         if (bodyText.Length == 0 && bodyHtml.Length > 0) bodyText = HtmlToText(bodyHtml);
+        if (depthExceeded) bodyText = JoinBodies([bodyText, DepthTruncationNotice]);
 
         string sender = Header(source.Payload, "From");
         string sentAt = ParseHeaderDate(Header(source.Payload, "Date"));
@@ -47,6 +54,7 @@ static partial class GmailMessageMapper
             SizeBytes = Math.Max(0, source.SizeEstimate),
             LabelIds = source.LabelIds.Distinct(StringComparer.Ordinal).ToArray(),
             Attachments = attachments,
+            BodyDecodeErrors = decodeErrors,
         };
     }
 
@@ -87,17 +95,110 @@ static partial class GmailMessageMapper
     public static string HtmlToText(string html)
     {
         if (string.IsNullOrWhiteSpace(html)) return "";
-        string text = ScriptStyleRegex().Replace(html, " ");
-        text = HtmlCommentRegex().Replace(text, " ");
-        text = BreakRegex().Replace(text, "\n");
-        text = TagRegex().Replace(text, " ");
+        if (html.Length > MaxHtmlLength) html = TextLimit.Take(html, MaxHtmlLength);
+        string text = StripMarkup(html);
         text = WebUtility.HtmlDecode(text);
-        text = HorizontalWhitespaceRegex().Replace(text, " ");
-        text = NewlineWhitespaceRegex().Replace(text, "\n");
-        return ExcessNewlinesRegex().Replace(text, "\n\n").Trim();
+        try
+        {
+            text = HorizontalWhitespaceRegex().Replace(text, " ");
+            text = NewlineWhitespaceRegex().Replace(text, "\n");
+            text = ExcessNewlinesRegex().Replace(text, "\n\n");
+        }
+        catch (RegexMatchTimeoutException) { }
+        return text.Trim();
     }
 
-    static void Visit(GmailApiPart part, List<string> plain, List<string> html, List<GmailAttachmentRecord> attachments)
+    // Tolerancyjny skaner znacznikow zamiast regexow: dziala liniowo na wrogim HTML,
+    // usuwa bloki script/style/komentarze takze bez domkniecia (do konca wejscia)
+    // i respektuje '>' wewnatrz cytowanych wartosci atrybutow.
+    static string StripMarkup(string html)
+    {
+        var text = new StringBuilder(html.Length);
+        int index = 0;
+        while (index < html.Length)
+        {
+            char current = html[index];
+            if (current != '<') { text.Append(current); index++; continue; }
+
+            if (index + 3 < html.Length && html[index + 1] == '!' && html[index + 2] == '-' && html[index + 3] == '-')
+            {
+                int end = html.IndexOf("-->", index + 4, StringComparison.Ordinal);
+                index = end < 0 ? html.Length : end + 3;
+                text.Append(' ');
+                continue;
+            }
+
+            char marker = index + 1 < html.Length ? html[index + 1] : '\0';
+            if (!char.IsAsciiLetter(marker) && marker != '/' && marker != '!' && marker != '?')
+            { text.Append('<'); index++; continue; }
+
+            bool closing = marker == '/';
+            int nameStart = closing ? index + 2 : index + 1;
+            int nameEnd = nameStart;
+            while (nameEnd < html.Length && char.IsAsciiLetterOrDigit(html[nameEnd])) nameEnd++;
+            ReadOnlySpan<char> name = html.AsSpan(nameStart, nameEnd - nameStart);
+
+            text.Append(IsBreakTag(name, closing) ? '\n' : ' ');
+            int close = FindTagClose(html, nameEnd);
+            if (close < 0) break;
+
+            index = close + 1;
+            bool selfClosing = close - 1 >= nameEnd && html[close - 1] == '/';
+            if (!closing && !selfClosing && IsRawTextElement(name))
+                index = SkipRawTextElement(html, index, name);
+        }
+        return text.ToString();
+    }
+
+    static bool IsRawTextElement(ReadOnlySpan<char> name)
+        => name.Equals("script", StringComparison.OrdinalIgnoreCase)
+        || name.Equals("style", StringComparison.OrdinalIgnoreCase);
+
+    static bool IsBreakTag(ReadOnlySpan<char> name, bool closing)
+    {
+        if (!closing) return name.Equals("br", StringComparison.OrdinalIgnoreCase);
+        if (name.Equals("p", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("div", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("li", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("tr", StringComparison.OrdinalIgnoreCase)) return true;
+        return name.Length == 2 && (name[0] == 'h' || name[0] == 'H') && name[1] is >= '1' and <= '6';
+    }
+
+    static int FindTagClose(string html, int start)
+    {
+        char quote = '\0';
+        for (int i = start; i < html.Length; i++)
+        {
+            char c = html[i];
+            if (quote != '\0') { if (c == quote) quote = '\0'; }
+            else if (c == '"' || c == '\'') quote = c;
+            else if (c == '>') return i;
+        }
+        return -1;
+    }
+
+    static int SkipRawTextElement(string html, int start, ReadOnlySpan<char> name)
+    {
+        int search = start;
+        while (search < html.Length)
+        {
+            int open = html.IndexOf("</", search, StringComparison.Ordinal);
+            if (open < 0) break;
+            int afterName = open + 2 + name.Length;
+            if (afterName <= html.Length
+                && html.AsSpan(open + 2, name.Length).Equals(name, StringComparison.OrdinalIgnoreCase)
+                && (afterName == html.Length || html[afterName] == '>' || html[afterName] == '/' || char.IsWhiteSpace(html[afterName])))
+            {
+                int close = FindTagClose(html, afterName);
+                return close < 0 ? html.Length : close + 1;
+            }
+            search = open + 2;
+        }
+        return html.Length;
+    }
+
+    static bool Visit(GmailApiPart part, List<string> plain, List<string> html, List<GmailAttachmentRecord> attachments,
+        List<string> decodeErrors, int depth)
     {
         string mime = (part.MimeType ?? "application/octet-stream").Trim().ToLowerInvariant();
         bool namedAttachment = !string.IsNullOrWhiteSpace(part.Filename);
@@ -118,19 +219,23 @@ static partial class GmailMessageMapper
 
         if (!namedAttachment && mime == "text/plain" && !string.IsNullOrEmpty(part.Data))
         {
-            string text = DecodePartText(part);
-            if (text.Length > 0) plain.Add(text);
+            if (DecodePartText(part) is { } text) { if (text.Length > 0) plain.Add(text); }
+            else decodeErrors.Add(part.PartId ?? "");
         }
         else if (!namedAttachment && mime == "text/html" && !string.IsNullOrEmpty(part.Data))
         {
-            string text = DecodePartText(part);
-            if (text.Length > 0) html.Add(text);
+            if (DecodePartText(part) is { } text) { if (text.Length > 0) html.Add(text); }
+            else decodeErrors.Add(part.PartId ?? "");
         }
 
-        foreach (var child in part.Parts) Visit(child, plain, html, attachments);
+        if (depth >= MaxMimePartDepth) return part.Parts.Count > 0;
+        bool truncated = false;
+        foreach (var child in part.Parts) truncated |= Visit(child, plain, html, attachments, decodeErrors, depth + 1);
+        return truncated;
     }
 
-    static string DecodePartText(GmailApiPart part)
+    // null = treść nie do odzyskania (np. uszkodzone Base64URL); wywołujący raportuje utratę.
+    static string? DecodePartText(GmailApiPart part)
     {
         try
         {
@@ -142,7 +247,7 @@ static partial class GmailMessageMapper
             catch { encoding = Encoding.UTF8; }
             return encoding.GetString(bytes).Trim();
         }
-        catch { return ""; }
+        catch { return null; }
     }
 
     static string Header(GmailApiPart payload, string name)
@@ -157,18 +262,22 @@ static partial class GmailMessageMapper
     static string DecodeHeader(string value)
     {
         if (string.IsNullOrWhiteSpace(value)) return "";
-        return EncodedWordRegex().Replace(value, match =>
+        try
         {
-            try
+            return EncodedWordRegex().Replace(value, match =>
             {
-                string charset = match.Groups[1].Value;
-                bool base64 = match.Groups[2].Value.Equals("B", StringComparison.OrdinalIgnoreCase);
-                string encoded = match.Groups[3].Value;
-                byte[] bytes = base64 ? Convert.FromBase64String(encoded) : DecodeQ(encoded);
-                return Encoding.GetEncoding(charset).GetString(bytes);
-            }
-            catch { return match.Value; }
-        }).Trim();
+                try
+                {
+                    string charset = match.Groups[1].Value;
+                    bool base64 = match.Groups[2].Value.Equals("B", StringComparison.OrdinalIgnoreCase);
+                    string encoded = match.Groups[3].Value;
+                    byte[] bytes = base64 ? Convert.FromBase64String(encoded) : DecodeQ(encoded);
+                    return Encoding.GetEncoding(charset).GetString(bytes);
+                }
+                catch { return match.Value; }
+            }).Trim();
+        }
+        catch (RegexMatchTimeoutException) { return value.Trim(); }
     }
 
     static byte[] DecodeQ(string encoded)
@@ -187,11 +296,15 @@ static partial class GmailMessageMapper
 
     static (string Name, string Email) SplitSender(string sender)
     {
-        var angle = SenderAngleRegex().Match(sender);
-        if (angle.Success)
-            return (angle.Groups[1].Value.Trim().Trim('"'), angle.Groups[2].Value.Trim());
-        var email = EmailRegex().Match(sender);
-        return email.Success ? (sender == email.Value ? "" : sender.Replace(email.Value, "").Trim(), email.Value) : (sender, "");
+        try
+        {
+            var angle = SenderAngleRegex().Match(sender);
+            if (angle.Success)
+                return (angle.Groups[1].Value.Trim().Trim('"'), angle.Groups[2].Value.Trim());
+            var email = EmailRegex().Match(sender);
+            return email.Success ? (sender == email.Value ? "" : sender.Replace(email.Value, "").Trim(), email.Value) : (sender, "");
+        }
+        catch (RegexMatchTimeoutException) { return (sender, ""); }
     }
 
     static string UnixDate(long milliseconds)
@@ -200,33 +313,27 @@ static partial class GmailMessageMapper
         catch { return ""; }
     }
 
+    // AssumeUniversal: nagłówek Date bez strefy nie może zależeć od strefy hosta.
     static string ParseHeaderDate(string value) =>
-        DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var date)
+        DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture,
+            DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.AssumeUniversal, out var date)
             ? date.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
             : "";
 
     static string JoinBodies(IEnumerable<string> bodies) => string.Join("\n\n", bodies.Where(x => !string.IsNullOrWhiteSpace(x))).Trim();
 
-    [GeneratedRegex("<\\s*(script|style)\\b[^>]*>.*?<\\s*/\\s*\\1\\s*>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
-    private static partial Regex ScriptStyleRegex();
-    [GeneratedRegex("<!--[\\s\\S]*?-->")]
-    private static partial Regex HtmlCommentRegex();
-    [GeneratedRegex("<\\s*(br\\s*/?|/p|/div|/li|/tr|/h[1-6])\\s*>", RegexOptions.IgnoreCase)]
-    private static partial Regex BreakRegex();
-    [GeneratedRegex("<[^>]+>")]
-    private static partial Regex TagRegex();
-    [GeneratedRegex("[\\p{Zs}\\t\\f\\v ]+")]
+    [GeneratedRegex("[\\p{Zs}\\t\\f\\v ]+", RegexOptions.None, 1_000)]
     private static partial Regex HorizontalWhitespaceRegex();
-    [GeneratedRegex(" *\\r?\\n *")]
+    [GeneratedRegex(" *\\r?\\n *", RegexOptions.None, 1_000)]
     private static partial Regex NewlineWhitespaceRegex();
-    [GeneratedRegex("\\n{3,}")]
+    [GeneratedRegex("\\n{3,}", RegexOptions.None, 1_000)]
     private static partial Regex ExcessNewlinesRegex();
-    [GeneratedRegex("charset\\s*=\\s*([^;\\s]+)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex("charset\\s*=\\s*([^;\\s]+)", RegexOptions.IgnoreCase, 1_000)]
     private static partial Regex CharsetRegex();
-    [GeneratedRegex("=\\?([^?]+)\\?([bBqQ])\\?([^?]+)\\?=")]
+    [GeneratedRegex("=\\?([^?]+)\\?([bBqQ])\\?([^?]+)\\?=", RegexOptions.None, 1_000)]
     private static partial Regex EncodedWordRegex();
-    [GeneratedRegex("^\\s*(.*?)\\s*<\\s*([^<>]+@[^<>]+)\\s*>\\s*$")]
+    [GeneratedRegex("^\\s*(.*?)\\s*<\\s*([^<>]+@[^<>]+)\\s*>\\s*$", RegexOptions.None, 1_000)]
     private static partial Regex SenderAngleRegex();
-    [GeneratedRegex("[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+")]
+    [GeneratedRegex("[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+", RegexOptions.None, 1_000)]
     private static partial Regex EmailRegex();
 }

@@ -73,6 +73,8 @@ sealed class GmailStoredMessage
     public long SizeBytes { get; init; }
     public IReadOnlyList<string> LabelIds { get; init; } = Array.Empty<string>();
     public IReadOnlyList<GmailAttachmentRecord> Attachments { get; init; } = Array.Empty<GmailAttachmentRecord>();
+    /// <summary>Identyfikatory części, których treści nie dało się zdekodować (wiadomość zapisana bez tej treści).</summary>
+    public IReadOnlyList<string> BodyDecodeErrors { get; init; } = Array.Empty<string>();
 
     public string EntryId => $"gmail:{AccountId}:{GmailMessageId}";
 }

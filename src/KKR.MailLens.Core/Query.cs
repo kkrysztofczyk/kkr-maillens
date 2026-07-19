@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using Microsoft.Data.Sqlite;
@@ -9,26 +10,38 @@ static class Query
 {
     public static int Run(string keyHex, string[] args)
     {
-        // pierwszy nie-flagowy argument po 'query' = tekst FTS (moze byc pusty -> czysto strukturalne)
-        string fts = FirstPositional(args);
-        string? from = Args.Str(args, "--from"), to = Args.Str(args, "--to"), sender = Args.Str(args, "--sender"), folder = Args.Str(args, "--folder");
-        int limit = Args.Int(args, "--limit", 25);
-
         using var c = Db.Open(keyHex, create: false);
         Db.EnsureSchema(c); // auto-migracja (np. dodaje kolumne kind starszym bazom) - brak "no such column"
+        return Run(c, args);
+    }
+
+    internal static int Run(SqliteConnection c, string[] args)
+    {
+        // '--' konczy flagi: wszystko po nim to tekst FTS (GUI tak przekazuje frazy zaczynajace sie od '--').
+        // Bez separatora: pierwszy nie-flagowy argument po 'query' (moze byc pusty -> czysto strukturalne).
+        int sep = Array.IndexOf(args, "--");
+        string[] flags = sep >= 0 ? args[..sep] : args;
+        string fts = sep >= 0 ? string.Join(' ', args[(sep + 1)..]) : FirstPositional(args);
+        string? from = Args.Str(flags, "--from"), to = Args.Str(flags, "--to"), sender = Args.Str(flags, "--sender"), folder = Args.Str(flags, "--folder");
+        int limit = Args.Int(flags, "--limit", 25);
+
+        if (!TryDateBound(from, exclusiveUpper: false, out string? fromBound))
+        { Console.Error.WriteLine($"Nieprawidlowa data --from: '{from}'. Format: yyyy-MM-dd lub yyyy-MM-dd HH:mm[:ss]."); return 1; }
+        if (!TryDateBound(to, exclusiveUpper: true, out string? toBound))
+        { Console.Error.WriteLine($"Nieprawidlowa data --to: '{to}'. Format: yyyy-MM-dd lub yyyy-MM-dd HH:mm[:ss]."); return 1; }
 
         var where = new List<string>();
         var ps = new List<(string, object)>();
         bool useFts = !string.IsNullOrWhiteSpace(fts);
-        bool raw = Args.Flag(args, "--raw"); // --raw = przekaz zapytanie wprost (skladnia FTS: AND/OR/prefix*)
+        bool raw = Args.Flag(flags, "--raw"); // --raw = przekaz zapytanie wprost (skladnia FTS: AND/OR/prefix*)
         if (useFts) { where.Add("mails_fts MATCH $q"); ps.Add(("$q", raw ? fts : FtsSanitize(fts))); }
-        if (!string.IsNullOrWhiteSpace(from)) { where.Add("m.received >= $from"); ps.Add(("$from", from!)); }
-        if (!string.IsNullOrWhiteSpace(to)) { where.Add("m.received < $to"); ps.Add(("$to", to! + " 99")); } // caly dzien
-        if (!string.IsNullOrWhiteSpace(sender)) { where.Add("(m.sender_name LIKE $snd OR m.sender_email LIKE $snd)"); ps.Add(("$snd", "%" + sender + "%")); }
-        if (!string.IsNullOrWhiteSpace(folder)) { where.Add("m.folder_leaf LIKE $fld"); ps.Add(("$fld", folder! + "%")); } // dopasuj realny leaf (inbox/sent/archiwum/...), nie zgaduj
+        if (fromBound != null) { where.Add("m.received >= $from"); ps.Add(("$from", fromBound)); }
+        if (toBound != null) { where.Add("m.received < $to"); ps.Add(("$to", toBound)); }
+        if (!string.IsNullOrWhiteSpace(sender)) { where.Add(@"(m.sender_name LIKE $snd ESCAPE '\' OR m.sender_email LIKE $snd ESCAPE '\')"); ps.Add(("$snd", "%" + EscapeLike(sender!) + "%")); }
+        if (!string.IsNullOrWhiteSpace(folder)) { where.Add(@"m.folder_leaf LIKE $fld ESCAPE '\'"); ps.Add(("$fld", EscapeLike(folder!) + "%")); } // dopasuj realny leaf (inbox/sent/archiwum/...), nie zgaduj
 
         // Domyslnie odsiewamy alerty (firehose). --all = wszystko, --alerts = tylko alerty.
-        bool all = Args.Flag(args, "--all"), alertsOnly = Args.Flag(args, "--alerts");
+        bool all = Args.Flag(flags, "--all"), alertsOnly = Args.Flag(flags, "--alerts");
         if (alertsOnly) where.Add("m.kind = 'alert'");
         else if (!all) where.Add("(m.kind IS NULL OR m.kind <> 'alert')");
 
@@ -100,8 +113,26 @@ static class Query
         return 0;
     }
 
-    // Flagi bez wartosci (nie konsumuja nastepnego argumentu).
-    static readonly HashSet<string> ValuelessFlags = new(StringComparer.OrdinalIgnoreCase) { "--all", "--alerts", "--raw" };
+    // Flagi z wartoscia (konsumuja nastepny argument). Pozostale '--*' NIE konsumuja - tak samo jak
+    // ContentSearch.FirstPositional i Cli.QueryText; nieznana flaga nie moze "zjesc" np. --limit.
+    static readonly HashSet<string> ValueFlags = new(StringComparer.OrdinalIgnoreCase) { "--from", "--to", "--sender", "--folder", "--limit" };
+
+    // Kolumna received przechowuje UTC "yyyy-MM-dd HH:mm:ss"; granice porownujemy leksykograficznie.
+    // Gorna granica jest wylaczna: dla samej daty liczymy poczatek nastepnego dnia (caly dzien wlacznie).
+    internal static bool TryDateBound(string? input, bool exclusiveUpper, out string? bound)
+    {
+        bound = null;
+        if (string.IsNullOrWhiteSpace(input)) return true;
+        string s = input.Trim();
+        if (DateTime.TryParseExact(s, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d))
+        { bound = (exclusiveUpper ? d.AddDays(1) : d).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture); return true; }
+        if (DateTime.TryParseExact(s, new[] { "yyyy-MM-dd HH:mm", "yyyy-MM-dd HH:mm:ss" }, CultureInfo.InvariantCulture, DateTimeStyles.None, out d))
+        { bound = d.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture); return true; }
+        return false;
+    }
+
+    // % i _ z wejscia uzytkownika to literaly, nie wildcards LIKE ('_' jest czesty w adresach e-mail).
+    internal static string EscapeLike(string s) => s.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
     // Bezpieczne zapytanie FTS5: kazdy token w cudzyslow -> znaki specjalne (. - @ : itp.) traktowane
     // jako literaly, brak "syntax error". Wiele tokenow = implicit AND. Wewnetrzne " podwojone.
@@ -199,7 +230,7 @@ static class Query
         // args[0] = "query"; szukamy pierwszego argumentu ktory nie jest flaga ani wartoscia flagi
         for (int i = 1; i < args.Length; i++)
         {
-            if (args[i].StartsWith("--")) { if (!ValuelessFlags.Contains(args[i])) i++; continue; }
+            if (args[i].StartsWith("--", StringComparison.Ordinal)) { if (ValueFlags.Contains(args[i])) i++; continue; }
             return args[i];
         }
         return "";

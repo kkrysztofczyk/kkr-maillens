@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 using System.Text.Json;
 using MailKit;
@@ -23,16 +24,7 @@ static class Imap
         client.Authenticate(acct.User, acct.GetPassword(sessionKeyHex));
 
         // foldery-cele (Inbox + reszta z personal namespace), pomijajac systemowe/dublujace
-        var targets = new List<IMailFolder>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        void Add(IMailFolder f) { if (!Skip(f) && seen.Add(f.FullName)) targets.Add(f); }
-        try { Add(client.Inbox); } catch { }
-        foreach (var ns in client.PersonalNamespaces)
-        {
-            IList<IMailFolder> roots;
-            try { roots = client.GetFolders(ns); } catch { continue; }
-            foreach (var root in roots) CollectRec(root, Add);
-        }
+        List<IMailFolder> targets = TargetFolders(client);
 
         // total (dla %) - otwarcie readonly daje Count
         int total = 0;
@@ -95,6 +87,23 @@ static class Imap
         return totalMails;
     }
 
+    /// <summary>Foldery pocztowe konta (Inbox + personal namespace) po odfiltrowaniu systemowych;
+    /// wspolne dla harvestu i ponownego wyszukiwania kopii wiadomosci przy pobieraniu zalacznika.</summary>
+    internal static List<IMailFolder> TargetFolders(ImapClient client)
+    {
+        var targets = new List<IMailFolder>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void Add(IMailFolder f) { if (!Skip(f) && seen.Add(f.FullName)) targets.Add(f); }
+        try { Add(client.Inbox); } catch { }
+        foreach (var ns in client.PersonalNamespaces)
+        {
+            IList<IMailFolder> roots;
+            try { roots = client.GetFolders(ns); } catch { continue; }
+            foreach (var root in roots) CollectRec(root, Add);
+        }
+        return targets;
+    }
+
     static void CollectRec(IMailFolder folder, Action<IMailFolder> add)
     {
         add(folder);
@@ -112,6 +121,10 @@ static class Imap
             || a.HasFlag(FolderAttributes.Drafts) || a.HasFlag(FolderAttributes.All)
             || a.HasFlag(FolderAttributes.NoSelect) || a.HasFlag(FolderAttributes.NonExistent);
     }
+
+    // Korpus przechowuje received/sent w UTC (jak Gmail/Outlook) - jedna os czasu dla filtrow i ORDER BY.
+    internal static string FormatReceivedUtc(DateTimeOffset? when) =>
+        when is { } w ? w.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) : "";
 
     static HarvestedMail MapSummary(IMessageSummary s, string acctName, IMailFolder f, string body, string storeId)
     {
@@ -142,8 +155,7 @@ static class Imap
                     StringComparison.OrdinalIgnoreCase)));
         }
 
-        var when = env?.Date ?? s.InternalDate;
-        string recv = when is { } w ? w.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss") : "";
+        string recv = FormatReceivedUtc(env?.Date ?? s.InternalDate);
         return new HarvestedMail
         {
             EntryId = sourceIdentity,

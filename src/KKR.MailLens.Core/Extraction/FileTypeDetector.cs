@@ -1,5 +1,4 @@
 using System.Text;
-using System.IO.Compression;
 
 namespace KKR.MailLens;
 
@@ -75,23 +74,23 @@ static class FileTypeDetector
             || LooksLikeMpegAudioFrame(content)) return "audio/mpeg";
         if (!content.AsSpan().StartsWith("PK\x03\x04"u8)) return null;
 
-        try
-        {
-            using var stream = new MemoryStream(content, writable: false);
-            using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
-            if (archive.Entries.Any(entry => entry.FullName.StartsWith("word/", StringComparison.OrdinalIgnoreCase)))
-                return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-            if (archive.Entries.Any(entry => entry.FullName.StartsWith("xl/", StringComparison.OrdinalIgnoreCase)))
-                return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-            if (archive.Entries.Any(entry => entry.FullName.StartsWith("ppt/", StringComparison.OrdinalIgnoreCase)))
-                return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-            return "application/zip";
-        }
-        catch (InvalidDataException)
-        {
-            return null;
-        }
+        // Ograniczony odczyt katalogu centralnego: wrogi ZIP z gestym katalogiem nie moze
+        // wymusic zmaterializowania milionow wpisow na etapie samego rozpoznania typu.
+        IReadOnlyList<string>? entryNames = ZipCentralDirectory.TryReadEntryNames(
+            content, MaxSignatureArchiveEntries, out bool exceedsLimit);
+        if (entryNames is null) return null;
+        if (exceedsLimit) return "application/zip";
+        if (entryNames.Any(name => name.StartsWith("word/", StringComparison.OrdinalIgnoreCase)))
+            return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        if (entryNames.Any(name => name.StartsWith("xl/", StringComparison.OrdinalIgnoreCase)))
+            return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        if (entryNames.Any(name => name.StartsWith("ppt/", StringComparison.OrdinalIgnoreCase)))
+            return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        return "application/zip";
     }
+
+    // Spojny z domyslnym TextExtractionOptions.MaxArchiveEntries.
+    const int MaxSignatureArchiveEntries = 4_096;
 
     static bool LooksLikeMpegAudioFrame(byte[] content)
     {

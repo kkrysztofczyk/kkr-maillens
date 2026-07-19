@@ -45,6 +45,7 @@ sealed class MainForm : Form
     readonly NotifyIcon _tray = new() { Icon = System.Drawing.SystemIcons.Shield, Text = "KKR MailLens", Visible = false };
     CancellationTokenSource? _activeHarvest;
     bool _reallyExit, _balloonShown;
+    bool _busy; // straz przed nakladaniem operacji (np. Enter w _pin/_search) - SetBusy wylacza kontrolki, to jest pas i szelki
 
     public MainForm()
     {
@@ -157,6 +158,7 @@ sealed class MainForm : Form
 
     async Task DoInit()
     {
+        if (_busy) return;
         string pin = _pin.Text;
         if (pin.Length == 0) { Log("Wpisz PIN w polu, potem Inicjuj."); return; }
         string? confirm = PromptPin("Potwierdz PIN");
@@ -262,6 +264,7 @@ sealed class MainForm : Form
 
     async Task OpenNoiseRules()
     {
+        if (_busy) return;
         var rules = NoiseRules.Load();
         using var f = new Form
         {
@@ -363,8 +366,9 @@ sealed class MainForm : Form
 
     string[] BuildQueryArgs()
     {
+        // fraza za separatorem '--': tekst zaczynajacy sie od '--' nie zostanie potraktowany jak flaga
         string t = _search.Text.Trim();
-        return t.Length == 0 ? new[] { "query", "--limit", "50" } : new[] { "query", t, "--limit", "50" };
+        return t.Length == 0 ? new[] { "query", "--limit", "50" } : new[] { "query", "--limit", "50", "--", t };
     }
 
     string[] BuildContentQueryArgs()
@@ -420,8 +424,10 @@ sealed class MainForm : Form
             Console.WriteLine($"    {SearchLocation(hit)}{hit.Filename}");
             if (hit.Snippet.Length > 0) Console.WriteLine($"    | {hit.Snippet}");
         }
+        if (result.DimensionMismatch)
+            Console.WriteLine($"UWAGA: wymiary embeddingów nie pasują (indeks: {result.IndexedDimensions}, zapytanie: {result.QueryDimensions}) — uruchom semantic-index --rebuild.");
         if (result.CandidateLimitReached)
-            Console.WriteLine($"UWAGA: ranking ograniczono do {config.SemanticMaxCandidates} najnowszych segmentów.");
+            Console.WriteLine($"UWAGA: ranking ograniczono do {config.SemanticMaxCandidates} najnowszych segmentów. Zwiększ config --semantic-max-candidates lub zawęź zapytanie.");
         Console.WriteLine(result.Hits.Count == 0 ? "(brak trafień)" : $"-- {result.Hits.Count} trafień");
     }
 
@@ -449,6 +455,7 @@ sealed class MainForm : Form
 
     async Task DoUnlock()
     {
+        if (_busy) return;
         string pin = _pin.Text;
         if (pin.Length == 0) { Log("Podaj PIN."); return; }
         bool wantYubi = Mode.Yubi; // sticky - ustalone przy inicjacji
@@ -493,6 +500,7 @@ sealed class MainForm : Form
 
     async Task DoHarvest()
     {
+        if (_busy) return;
         string? key = RamSession.Key;
         if (key is null) { Log("Najpierw odblokuj."); return; }
         string zakres = (string)_range.SelectedItem!;
@@ -569,8 +577,13 @@ sealed class MainForm : Form
         }
     }
 
+    // Console.Out/Error sa globalne dla procesu: dwa rownolegle przechwycenia przeplotlyby save/restore
+    // i zostawily Console.Out na martwym StringWriterze - stad serializacja calego bloku podmiany.
+    static readonly object ConsoleCaptureLock = new();
+
     async Task RunCapture(Action a, string busy)
     {
+        if (_busy) return;
         if (RamSession.Key is null) { Log("Najpierw odblokuj."); return; }
         if (!File.Exists(Paths.CorpusDb)) { Log("Korpus pusty - najpierw Harvest."); return; }
         SetBusy(true, busy);
@@ -578,11 +591,14 @@ sealed class MainForm : Form
         {
             string txt = await Task.Run(() =>
             {
-                var sw = new StringWriter();
-                var oldOut = Console.Out; var oldErr = Console.Error;
-                Console.SetOut(sw); Console.SetError(sw); // przechwyc tez bledy (Query.Run pisze na stderr)
-                try { a(); } finally { Console.SetOut(oldOut); Console.SetError(oldErr); }
-                return sw.ToString();
+                lock (ConsoleCaptureLock)
+                {
+                    var sw = new StringWriter();
+                    var oldOut = Console.Out; var oldErr = Console.Error;
+                    Console.SetOut(sw); Console.SetError(sw); // przechwyc tez bledy (Query.Run pisze na stderr)
+                    try { a(); } finally { Console.SetOut(oldOut); Console.SetError(oldErr); }
+                    return sw.ToString();
+                }
             });
             _out.Text = txt.Length == 0 ? "(brak wyniku)" : txt.Replace("\n", Environment.NewLine);
         }
@@ -592,8 +608,10 @@ sealed class MainForm : Form
 
     void SetBusy(bool busy, string? msg = null)
     {
+        _busy = busy;
         _init.Enabled = _unlock.Enabled = _lock.Enabled = _searchBtn.Enabled = _statsBtn.Enabled = _harvestBtn.Enabled
             = _range.Enabled = _ttl.Enabled = _rulesBtn.Enabled = _gmailBtn.Enabled = _searchKind.Enabled = !busy;
+        _pin.Enabled = _search.Enabled = !busy; // Enter w tych polach startuje operacje - tez musza byc zablokowane
         UseWaitCursor = busy;
         if (busy && msg != null) _status.Text = msg;
     }

@@ -41,6 +41,7 @@ sealed class GmailManagerForm : Form
     readonly System.Windows.Forms.Timer _sessionTimer = new() { Interval = 1000 };
     CancellationTokenSource? _operation;
     bool _gmailOperation;
+    long[] _gmailSyncAccounts = [];
 
     public GmailManagerForm(Func<string?> keyProvider)
     {
@@ -120,6 +121,10 @@ sealed class GmailManagerForm : Form
                 return (dashboard, ProcessingJobRepository.Counts(connection));
             });
 
+            // Odswiezanie nie jest sledzone w _operation, wiec OnFormClosing go nie blokuje - okno moglo
+            // zostac zamkniete i zwolnione w trakcie await; dotkniecie kontrolek rzuciloby ObjectDisposedException.
+            if (IsDisposed || Disposing) return;
+
             _accounts.BeginUpdate();
             try
             {
@@ -171,7 +176,6 @@ sealed class GmailManagerForm : Form
         await RunOperation(full ? "Pełna synchronizacja Gmail…" : "Synchronizacja Gmail…",
             async (key, cancellationToken) => await Task.Run(async () =>
             {
-                GmailCancellation.Clear();
                 try
                 {
                     using var connection = Db.Open(key, create: false);
@@ -181,6 +185,8 @@ sealed class GmailManagerForm : Form
                         : GmailRepository.FindAccount(connection, selectedId.Value) is { } selected
                             ? [selected] : [];
                     if (accounts.Count == 0) throw new InvalidOperationException("Brak konta do synchronizacji.");
+                    _gmailSyncAccounts = accounts.Select(account => account.Id).ToArray();
+                    foreach (long accountId in _gmailSyncAccounts) GmailCancellation.Clear(accountId);
 
                     long processed = 0, inserted = 0, updated = 0, deleted = 0, errors = 0;
                     foreach (GmailAccountRecord account in accounts)
@@ -200,7 +206,11 @@ sealed class GmailManagerForm : Form
                     return $"Synchronizacja zakończona: przetworzono={processed}, nowe={inserted}, "
                         + $"aktualizacje={updated}, usunięte={deleted}, błędy={errors}.";
                 }
-                finally { GmailCancellation.Clear(); }
+                finally
+                {
+                    foreach (long accountId in _gmailSyncAccounts) GmailCancellation.Clear(accountId);
+                    _gmailSyncAccounts = [];
+                }
             }, cancellationToken), gmailOperation: true);
     }
 
@@ -245,7 +255,20 @@ sealed class GmailManagerForm : Form
             int memoryLimitMb = Math.Clamp(AppConfig.Load().WorkerMemoryLimitMb, 256, 16_384);
             using RestrictedWorkerProcess worker = RestrictedWorkerProcess.Start(executable, "--drain",
                 memoryLimitMb * 1024L * 1024L);
-            await worker.Process.WaitForExitAsync(cancellationToken);
+            try
+            {
+                await worker.Process.WaitForExitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                // Łagodne zatrzymanie: Worker oddaje bieżące zadanie (Abandon) i sam się kończy.
+                // Dopiero gdy nie zdąży w okresie łaski, Dispose zamyka job object i ubija drzewo.
+                worker.RequestStop();
+                using var grace = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                try { await worker.Process.WaitForExitAsync(grace.Token); }
+                catch (OperationCanceledException) { }
+                throw;
+            }
             return $"Worker zakończył działanie z kodem {worker.Process.ExitCode}.";
         });
     }
@@ -273,14 +296,18 @@ sealed class GmailManagerForm : Form
             _operation.Dispose();
             _operation = null;
             _gmailOperation = false;
-            SetBusy(false);
-            await RefreshDashboardAsync();
+            if (!IsDisposed && !Disposing) // zamkniecie inne niz UserClosing (np. wyjscie aplikacji) nie czeka na operacje
+            {
+                SetBusy(false);
+                await RefreshDashboardAsync();
+            }
         }
     }
 
     void CancelOperation()
     {
-        if (_gmailOperation) GmailCancellation.Request();
+        if (_gmailOperation)
+            foreach (long accountId in _gmailSyncAccounts) GmailCancellation.Request(accountId);
         _operation?.Cancel();
         _status.Text = "Anulowanie operacji…";
     }
@@ -303,8 +330,12 @@ sealed class GmailManagerForm : Form
         UseWaitCursor = busy;
     }
 
-    void Log(string message) =>
+    void Log(string message)
+    {
+        // Kontynuacje async moga dobiec juz po zamknieciu okna - log do zwolnionej kontrolki by rzucil.
+        if (IsDisposed || Disposing) return;
         _log.AppendText((_log.TextLength == 0 ? "" : Environment.NewLine) + message);
+    }
 
     static string SafeError(Exception exception) => exception switch
     {

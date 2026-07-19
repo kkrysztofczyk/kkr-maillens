@@ -143,6 +143,8 @@ run\KKR.MailLens.exe query-semantic "neutralny tekst"
 
 `semantic-index --rebuild` odtwarza embeddingi wybranego modelu, a `query-semantic --semantic-only` pomija FTS5. Domyślne wyszukiwanie hybrydowe łączy ranking FTS5 i podobieństwo cosinusowe przez Reciprocal Rank Fusion, z większą wagą kanału dokładnego. Po włączeniu funkcji Worker automatycznie kolejkuje zadanie `embed` po zakończonej ekstrakcji, OCR lub transkrypcji. GUI udostępnia osobny zakres `Hybrydowe`.
 
+`--semantic-max-candidates` (domyślnie 25000, maksymalnie 250000) ogranicza liczbę segmentów ocenianych w jednym zapytaniu semantycznym, aby czas odpowiedzi pozostał przewidywalny. Kandydaci są wybierani od najnowszych wiadomości, więc po przekroczeniu limitu starsze segmenty nie biorą udziału w rankingu — zapytanie wypisuje wtedy ostrzeżenie; można zwiększyć limit lub zawęzić zapytanie. Wektory kandydatów są przetwarzane strumieniowo, więc wyższy limit wydłuża zapytanie, ale nie zwiększa istotnie zużycia pamięci. Jeśli model embeddingów zmienił wymiar wektora (np. po podmianie modelu pod tą samą nazwą), zapytanie zgłasza niezgodność wymiarów i wymaga `semantic-index --rebuild`.
+
 ## Konserwacja magazynu blobów
 
 Zaszyfrowany blob może być współdzielony przez wiele wiadomości. Garbage collection usuwa plik dopiero po zniknięciu ostatniej aktywnej referencji i pomija dane używane przez działające zadanie Workera. Najpierw można wykonać bezpieczny podgląd:

@@ -35,6 +35,65 @@ public sealed class ContentSearchTests
         Assert.AreEqual("record.txt", hits[0].Filename);
     }
 
+    [TestMethod]
+    public void Search_NeutralizesFts5MetacharactersWithoutSqlErrors()
+    {
+        using var db = new TestDatabase();
+        IndexSampleDocument(db);
+
+        string[] hostileQueries =
+        [
+            "\"",
+            "\"\"\"",
+            "tekst\"",
+            "\"niedomknięta fraza",
+            "NEAR",
+            "NEAR(tekst indeksu, 4)",
+            "kolumna:tekst",
+            "testow*",
+            "(((",
+            "tekst) OR (indeksu",
+            "AND OR NOT",
+            "tekst + indeksu - fraza",
+            "^tekst",
+            "{tekst}",
+            "cast(x'41' as text)",
+        ];
+        foreach (string query in hostileQueries)
+        {
+            IReadOnlyList<ContentSearchHit> hits = ContentSearch.Search(db.Connection, query);
+            Assert.IsNotNull(hits, $"Zapytanie nie może zgłosić wyjątku: {query}");
+        }
+
+        // Operatory potraktowane literalnie: OR nie rozszerza dopasowania, gwiazdka nie robi prefiksu.
+        Assert.AreEqual(1, ContentSearch.Search(db.Connection, "tekst indeksu").Count);
+        Assert.AreEqual(0, ContentSearch.Search(db.Connection, "brakujące OR tekst").Count);
+        Assert.AreEqual(0, ContentSearch.Search(db.Connection, "testow*").Count);
+    }
+
+    [TestMethod]
+    public void Search_RawModeKeepsAdvancedSyntaxAndSurfacesSyntaxErrors()
+    {
+        using var db = new TestDatabase();
+        IndexSampleDocument(db);
+
+        Assert.AreEqual(1, ContentSearch.Search(db.Connection, "NEAR(tekst indeksu, 10)", raw: true).Count);
+        Assert.AreEqual(1, ContentSearch.Search(db.Connection, "testow*", raw: true).Count);
+        Assert.AreEqual(1, ContentSearch.Search(db.Connection, "brakujące OR tekst", raw: true).Count);
+        Assert.Throws<Microsoft.Data.Sqlite.SqliteException>(() =>
+            ContentSearch.Search(db.Connection, "AND (((", raw: true));
+    }
+
+    static void IndexSampleDocument(TestDatabase db)
+    {
+        long attachmentId = AddAttachment(db);
+        long documentId = ContentDocumentRepository.EnsureAttachmentDocument(
+            db.Connection, attachmentId, new string('e', 64), "text/plain");
+        ExtractionResult extraction = new ContentExtractionDispatcher().Extract(
+            "record.txt", "text/plain", "Neutralny tekst wiadomości używany do testowania indeksu"u8.ToArray());
+        ContentDocumentRepository.SaveExtraction(db.Connection, documentId, extraction, "plain-text", "1");
+    }
+
     static long AddAttachment(TestDatabase db)
     {
         GmailAccountRecord account = db.AddAccount();

@@ -54,7 +54,7 @@ sealed class GmailSynchronizer
 
     async Task<GmailSyncResult> FullSync(GmailAccountRecord account, bool reset, CancellationToken cancellationToken)
     {
-        GmailCancellation.ThrowIfRequested(cancellationToken);
+        GmailCancellation.ThrowIfRequested(account.Id, cancellationToken);
         GmailProfile profile = await _api.GetProfileAsync(cancellationToken).ConfigureAwait(false);
         bool startNewGeneration = reset || account.InitialSyncCompleted || account.SyncGeneration == 0;
         GmailRepository.BeginFullSync(_database, account.Id, profile.HistoryId, startNewGeneration);
@@ -68,7 +68,7 @@ sealed class GmailSynchronizer
         string? pageToken = account.InitialPageToken;
         do
         {
-            GmailCancellation.ThrowIfRequested(cancellationToken);
+            GmailCancellation.ThrowIfRequested(account.Id, cancellationToken);
             GmailMessagePage page;
             try { page = await _api.ListMessageIdsAsync(pageToken, cancellationToken).ConfigureAwait(false); }
             catch (GmailPageTokenExpiredException)
@@ -109,7 +109,7 @@ sealed class GmailSynchronizer
 
     async Task<GmailSyncResult> IncrementalSync(GmailAccountRecord account, CancellationToken cancellationToken)
     {
-        GmailCancellation.ThrowIfRequested(cancellationToken);
+        GmailCancellation.ThrowIfRequested(account.Id, cancellationToken);
         IReadOnlyList<GmailApiLabel> labels = await _api.GetLabelsAsync(cancellationToken).ConfigureAwait(false);
         GmailRepository.UpsertLabels(_database, account.Id, labels);
         IReadOnlyDictionary<string, string> labelNames = GmailRepository.LabelNames(_database, account.Id);
@@ -140,7 +140,7 @@ sealed class GmailSynchronizer
         string latestHistoryId = startHistoryId;
         do
         {
-            GmailCancellation.ThrowIfRequested(cancellationToken);
+            GmailCancellation.ThrowIfRequested(account.Id, cancellationToken);
             GmailHistoryPage page = await _api.ListHistoryAsync(startHistoryId, pageToken, cancellationToken).ConfigureAwait(false);
             deleted += GmailRepository.DeleteMessages(_database, account.Id, page.DeletedMessageIds);
             PageResult saved = await FetchAndSave(account, page.UpsertMessageIds, labelNames, cancellationToken).ConfigureAwait(false);
@@ -173,12 +173,15 @@ sealed class GmailSynchronizer
             await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                GmailCancellation.ThrowIfRequested(cancellationToken);
+                GmailCancellation.ThrowIfRequested(account.Id, cancellationToken);
                 GmailApiMessage source = await _api.GetMessageAsync(messageId, cancellationToken).ConfigureAwait(false);
                 mapped.Add(GmailMessageMapper.Map(source, account.Id));
             }
             catch (GmailMessageNotFoundException) { missing.Add(messageId); }
-            catch (OperationCanceledException) { throw; }
+            // TaskCanceledException z wyczerpanych powtórzeń HTTP nie jest anulowaniem —
+            // przepuszczaj wyłącznie faktyczne żądanie anulowania, resztę licz jako błąd wiadomości.
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested
+                || GmailCancellation.IsRequested(account.Id)) { throw; }
             catch (Exception ex) { failures.Add((messageId, ex.GetType().Name)); }
             finally { gate.Release(); }
         }).ToArray();
@@ -190,6 +193,16 @@ sealed class GmailSynchronizer
             (failure.MessageId, Stage: "download", failure.Code)).ToList();
         foreach (var failure in failures)
             GmailRepository.RecordError(_database, account.Id, failure.MessageId, "download", failure.Code);
+
+        // Wiadomość z uszkodzoną treścią zapisujemy, ale utrata treści musi być widoczna w sync_errors.
+        long decodeErrors = 0;
+        foreach (GmailStoredMessage message in mapped)
+            foreach (string partId in message.BodyDecodeErrors)
+            {
+                decodeErrors++;
+                GmailRepository.RecordError(_database, account.Id, message.GmailMessageId, "decode",
+                    partId.Length == 0 ? "BodyDecodeFailed" : $"BodyDecodeFailed:{partId}");
+            }
 
         GmailSaveBatchResult saved;
         using (var transaction = _database.BeginTransaction())
@@ -213,7 +226,8 @@ sealed class GmailSynchronizer
         GmailRepository.ResolveRetries(_database, account.Id,
             saved.Saved.Select(message => message.GmailMessageId).Concat(missingIds));
 
-        return new PageResult(saved.Inserted, saved.Updated, deleted, failures.Count + saved.FailedMessageIds.Count);
+        return new PageResult(saved.Inserted, saved.Updated, deleted,
+            failures.Count + saved.FailedMessageIds.Count + decodeErrors);
     }
 
     sealed record PageResult(long Inserted, long Updated, long Deleted, long Errors);

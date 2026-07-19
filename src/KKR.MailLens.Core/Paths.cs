@@ -20,7 +20,7 @@ static class Paths
     public static string ConfigFile => Path.Combine(Base, "config.json"); // konfiguracja harvestu (store filter, limit)
     public static string GmailOAuthClientFile => Path.Combine(Base, "gmail-oauth-client.json"); // lokalna konfiguracja klienta OAuth
     public static string GmailTokensDir => Path.Combine(Base, "oauth-tokens"); // tokeny OAuth (sesja + DPAPI)
-    public static string GmailCancelFile => Path.Combine(Base, "gmail-sync.cancel"); // lokalny znacznik anulowania synchronizacji
+    public static string GmailCancelFile(long accountId) => Path.Combine(Base, $"gmail-sync.{accountId}.cancel"); // znacznik anulowania synchronizacji per konto
     public static string BlobsDir => Path.Combine(Base, "blobs"); // zaszyfrowane, deduplikowane załączniki
     public static string TempDir => Path.Combine(Base, "temp"); // krótkotrwałe pliki narzędzi lokalnych
 }

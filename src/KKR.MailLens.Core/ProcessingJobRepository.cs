@@ -22,10 +22,19 @@ static class ProcessingJobRepository
     public static int RetryFailed(SqliteConnection connection)
     {
         using var command = connection.CreateCommand();
+        // Pomija wiersze, których powrót do 'pending' złamałby ux_processing_jobs_active_attachment:
+        // istnieje już aktywny duplikat albo nowszy failed-duplikat (wtedy wraca tylko najnowszy).
+        // Bez tego cała instrukcja wycofuje się i żadne zadanie nie wraca do kolejki.
         command.CommandText = """
             UPDATE processing_jobs SET status='pending',attempts=0,available_at=$now,
                 locked_by=NULL,locked_at=NULL,lease_until=NULL,completed_at=NULL
-            WHERE status='failed';
+            WHERE status='failed' AND NOT EXISTS (
+                SELECT 1 FROM processing_jobs AS other
+                WHERE other.id<>processing_jobs.id
+                    AND other.job_type=processing_jobs.job_type
+                    AND other.attachment_id=processing_jobs.attachment_id
+                    AND (other.status IN ('pending','running')
+                        OR (other.status='failed' AND other.id>processing_jobs.id)));
             """;
         command.Parameters.AddWithValue("$now", Stamp(DateTimeOffset.UtcNow));
         return command.ExecuteNonQuery();
