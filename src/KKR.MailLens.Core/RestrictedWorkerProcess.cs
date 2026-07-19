@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
 
@@ -15,8 +16,6 @@ sealed class RestrictedWorkerProcess : IDisposable
     const uint CreateSuspended = 0x00000004;
     const uint CreateNoWindow = 0x08000000;
     const uint StartfUseStdHandles = 0x00000100;
-    const int SecurityMaxSidSize = 68;
-    const int WinBuiltinUsersSid = 27;
     const int SecurityImpersonation = 2;
     const int TokenPrimary = 1;
     const int StdInputHandle = -10;
@@ -127,23 +126,23 @@ sealed class RestrictedWorkerProcess : IDisposable
     {
         if (IsTokenRestricted(token)) return DuplicatePrimaryToken(token);
 
-        IntPtr usersSid = IntPtr.Zero;
+        SecurityIdentifier[] restricting = RestrictingSids(token);
+        var allocated = new List<IntPtr>(restricting.Length);
         try
         {
-            usersSid = Marshal.AllocHGlobal(SecurityMaxSidSize);
-            uint sidSize = SecurityMaxSidSize;
-            if (!CreateWellKnownSid(WinBuiltinUsersSid, IntPtr.Zero, usersSid, ref sidSize))
-                throw new Win32Exception(Marshal.GetLastWin32Error(),
-                    "Nie utworzono identyfikatora ograniczającego Workera.");
-
-            var restrictingSids = new[] { new SidAndAttributes
+            var sids = new SidAndAttributes[restricting.Length];
+            for (int i = 0; i < restricting.Length; i++)
             {
-                Sid = usersSid,
-                Attributes = 0
-            } };
+                byte[] binary = new byte[restricting[i].BinaryLength];
+                restricting[i].GetBinaryForm(binary, 0);
+                IntPtr native = Marshal.AllocHGlobal(binary.Length);
+                allocated.Add(native);
+                Marshal.Copy(binary, 0, native, binary.Length);
+                sids[i] = new SidAndAttributes { Sid = native, Attributes = 0 };
+            }
 
             if (!CreateRestrictedToken(token.DangerousGetHandle(), DisableMaxPrivilege, 0, IntPtr.Zero,
-                0, IntPtr.Zero, 1, restrictingSids, out IntPtr restrictedHandle))
+                0, IntPtr.Zero, (uint)sids.Length, sids, out IntPtr restrictedHandle))
             {
                 int error = Marshal.GetLastWin32Error();
                 throw new Win32Exception(error, $"Nie utworzono ograniczonego tokenu Workera (Win32 {error}).");
@@ -152,8 +151,74 @@ sealed class RestrictedWorkerProcess : IDisposable
         }
         finally
         {
-            if (usersSid != IntPtr.Zero) Marshal.FreeHGlobal(usersSid);
+            foreach (IntPtr native in allocated) Marshal.FreeHGlobal(native);
         }
+    }
+
+    /// <summary>
+    /// Restricting SID-y tokenu Workera. Kazdy access check przechodzi DWUKROTNIE - raz przeciw SID-om
+    /// uzytkownika, raz przeciw tej liscie - i wymaga zgody OBU. Lista musi wiec pokrywac KAZDA sciezke
+    /// dostepu potrzebna przy starcie i pracy procesu; pominiecie dowolnej konczy sie 0xC0000022
+    /// ACCESS_DENIED juz przy inicjalizacji procesu potomnego (a nie przy pierwszym uzyciu zasobu):
+    ///   - SID uzytkownika  -> %LOCALAPPDATA% (corpus.db, blobs, oauth-tokens) i DPAPI CurrentUser,
+    ///   - logon SID        -> DACL window station i pulpitu,
+    ///   - BUILTIN\Users    -> pliki systemowe (System32, runtime .NET) - DACL przyznaje prawa grupie,
+    ///                         nie SID-owi uzytkownika,
+    ///   - Everyone         -> zasoby ladowania obrazu procesu przyznane przez World SID,
+    ///   - Authenticated Users -> stos sieciowy i magazyn kluczy kryptograficznych (HTTPS do Gmail API).
+    /// Zestaw ustalony empirycznie: {user, logon, Users} dawalo ACCESS_DENIED przy starcie; po dolozeniu
+    /// Everyone proces startowal, ale kazde pobranie zalacznika konczylo sie HttpRequestException - dopiero
+    /// Authenticated Users odblokowuje HTTPS. Oba SID-y nie oslabiaja izolacji w istotny sposob: obejmuja
+    /// zasoby dostepne kazdemu zalogowanemu uzytkownikowi. Zawezenie polega na tym, ze odpada dostep
+    /// przyznany wylacznie przez
+    /// INNE grupy, przede wszystkim Administrators. Razem z DISABLE_MAX_PRIVILEGE (zdjecie przywilejow)
+    /// i Job Objectem (limit pamieci, ograniczenia UI) daje to sensowna izolacje procesu, ktory parsuje
+    /// wrogie dokumenty - zalaczniki, w tym ze spamu.
+    /// </summary>
+    static SecurityIdentifier[] RestrictingSids(SafeAccessTokenHandle token)
+    {
+        using WindowsIdentity identity = WindowsIdentity.GetCurrent();
+        var sids = new List<SecurityIdentifier>(4);
+        void Add(SecurityIdentifier? sid) { if (sid is not null && !sids.Contains(sid)) sids.Add(sid); }
+
+        Add(identity.User);
+        foreach (SecurityIdentifier logon in LogonSids(token)) Add(logon);
+        Add(new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null));
+        Add(new SecurityIdentifier(WellKnownSidType.WorldSid, null));
+        Add(new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null));
+
+        if (sids.Count == 0)
+            throw new InvalidOperationException("Nie ustalono SID-ow ograniczajacych dla tokenu Workera.");
+        return sids.ToArray();
+    }
+
+    /// <summary>Logon SID (S-1-5-5-X-Y) z TOKEN_GROUPS po atrybucie SE_GROUP_LOGON_ID.
+    /// WindowsIdentity.Groups go NIE zwraca - dlatego czytamy token bezposrednio.</summary>
+    static List<SecurityIdentifier> LogonSids(SafeAccessTokenHandle token)
+    {
+        const int TokenGroups = 2;
+        const uint SeGroupLogonId = 0xC0000000;
+        var found = new List<SecurityIdentifier>(1);
+
+        GetTokenInformation(token, TokenGroups, IntPtr.Zero, 0, out uint needed);
+        if (needed == 0) return found;
+        IntPtr buffer = Marshal.AllocHGlobal((int)needed);
+        try
+        {
+            if (!GetTokenInformation(token, TokenGroups, buffer, needed, out _)) return found;
+            int count = Marshal.ReadInt32(buffer);
+            int stride = Marshal.SizeOf<SidAndAttributes>();
+            for (int i = 0; i < count; i++)
+            {
+                IntPtr entry = buffer + IntPtr.Size + i * stride; // GroupCount + wyrownanie tablicy
+                IntPtr sid = Marshal.ReadIntPtr(entry);
+                uint attributes = (uint)Marshal.ReadInt32(entry + IntPtr.Size);
+                if ((attributes & SeGroupLogonId) == SeGroupLogonId && sid != IntPtr.Zero)
+                    found.Add(new SecurityIdentifier(sid));
+            }
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+        return found;
     }
 
     static SafeAccessTokenHandle DuplicatePrimaryToken(SafeAccessTokenHandle token)
@@ -237,11 +302,6 @@ sealed class RestrictedWorkerProcess : IDisposable
 
     [DllImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    static extern bool CreateWellKnownSid(int wellKnownSidType, IntPtr domainSid,
-        IntPtr sid, ref uint sidSize);
-
-    [DllImport("advapi32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
     static extern bool DuplicateTokenEx(SafeAccessTokenHandle existingToken, uint desiredAccess,
         IntPtr tokenAttributes, int impersonationLevel, int tokenType,
         out SafeAccessTokenHandle newToken);
@@ -257,6 +317,11 @@ sealed class RestrictedWorkerProcess : IDisposable
     [DllImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     static extern bool IsTokenRestricted(SafeAccessTokenHandle token);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool GetTokenInformation(SafeAccessTokenHandle token, int tokenInformationClass,
+        IntPtr tokenInformation, uint tokenInformationLength, out uint returnLength);
 
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
