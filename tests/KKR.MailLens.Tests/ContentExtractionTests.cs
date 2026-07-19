@@ -31,6 +31,47 @@ public sealed class ContentExtractionTests
     }
 
     [TestMethod]
+    public void Extract_TxtUtf16WithoutBom_DecodesPolishText()
+    {
+        byte[] content = Encoding.Unicode.GetBytes("Neutralny tekst załącznika ąęść");
+
+        ExtractionResult result = new ContentExtractionDispatcher().Extract("record.txt", "text/plain", content);
+
+        Assert.AreEqual("Neutralny tekst załącznika ąęść", result.CleanText);
+    }
+
+    [TestMethod]
+    public void Extract_TxtUtf16BigEndianWithoutBom_DecodesPolishText()
+    {
+        byte[] content = Encoding.BigEndianUnicode.GetBytes("Neutralny tekst załącznika ąęść");
+
+        ExtractionResult result = new ContentExtractionDispatcher().Extract("record.txt", "text/plain", content);
+
+        Assert.AreEqual("Neutralny tekst załącznika ąęść", result.CleanText);
+    }
+
+    [TestMethod]
+    public void Extract_CsvJsonXml_UsesPlainTextExtractor()
+    {
+        var dispatcher = new ContentExtractionDispatcher();
+        (string Filename, string? DeclaredMimeType, string Content, string ExpectedMimeType)[] cases =
+        [
+            ("record.csv", null, "kolumna,wartość\nneutralny tekst,test record", "text/csv"),
+            ("record.json", "application/json", "{\"klucz\":\"neutralny tekst\"}", "application/json"),
+            ("record.xml", null, "<root><item>neutralny tekst</item></root>", "application/xml"),
+            ("record.dat", "text/xml", "<root>neutralny tekst</root>", "text/xml"),
+        ];
+
+        foreach ((string filename, string? declaredMimeType, string content, string expectedMimeType) in cases)
+        {
+            ExtractionResult result = dispatcher.Extract(filename, declaredMimeType, Encoding.UTF8.GetBytes(content));
+
+            Assert.AreEqual(expectedMimeType, result.DetectedMimeType, filename);
+            StringAssert.Contains(result.CleanText, "neutralny tekst", filename);
+        }
+    }
+
+    [TestMethod]
     public void Extract_TxtWindows1250_DecodesFallbackText()
     {
         byte[] content = [.. Encoding.ASCII.GetBytes("Neutralny tekst "), 0xB9];

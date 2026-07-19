@@ -116,6 +116,13 @@ sealed class FfmpegWhisperTranscriber : IMediaTranscriber
             TryKill(process);
             throw new TimeoutException($"FFmpeg przekroczył limit {options.EffectiveFfmpegTimeout.TotalSeconds:0} s.");
         }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+        {
+            TryKill(process);
+            string error = await DiagnosticAsync(errorTask).ConfigureAwait(false);
+            string detail = error.Length == 0 ? ex.Message : error;
+            throw new InvalidOperationException($"FFmpeg przerwał strumień wejściowy: {Limit(detail)}", ex);
+        }
         catch { TryKill(process); throw; }
     }
 
@@ -169,6 +176,13 @@ sealed class FfmpegWhisperTranscriber : IMediaTranscriber
     }
 
     static void TryKill(Process process) { try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { } }
+
+    static async Task<string> DiagnosticAsync(Task<string> errorTask)
+    {
+        try { return await errorTask.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false); }
+        catch { return ""; }
+    }
+
     static string Limit(string value)
     {
         string clean = value.Replace('\r', ' ').Replace('\n', ' ').Trim();
