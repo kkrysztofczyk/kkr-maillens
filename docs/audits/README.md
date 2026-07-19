@@ -8,6 +8,7 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - [Audyt architektury i bezpieczeństwa](ARCHITECTURE-SECURITY-AUDIT-2026-07-18.md) — migawka `7f50d23`.
 - [Code review pipeline załączników](ATTACHMENT-PIPELINE-CODE-REVIEW-2026-07-18.md) — zakres `f4f6b02..01351b8`.
 - [Code review workera, ekstrakcji i OCR](WORKER-EXTRACTION-OCR-CODE-REVIEW-2026-07-18.md) — zakres `e578ea0..d3391d9`.
+- [Audyt całościowy kodu](CODEBASE-AUDIT-2026-07-19.md) — 41 ustaleń + rejestr statusu integracji.
 
 ## Status bieżący
 
