@@ -363,8 +363,9 @@ sealed class MainForm : Form
 
     string[] BuildQueryArgs()
     {
+        // fraza za separatorem '--': tekst zaczynajacy sie od '--' nie zostanie potraktowany jak flaga
         string t = _search.Text.Trim();
-        return t.Length == 0 ? new[] { "query", "--limit", "50" } : new[] { "query", t, "--limit", "50" };
+        return t.Length == 0 ? new[] { "query", "--limit", "50" } : new[] { "query", "--limit", "50", "--", t };
     }
 
     string[] BuildContentQueryArgs()
