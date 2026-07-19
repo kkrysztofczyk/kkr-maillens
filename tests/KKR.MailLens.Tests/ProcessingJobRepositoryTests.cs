@@ -179,6 +179,84 @@ public sealed class ProcessingJobRepositoryTests
         Assert.AreEqual(1, again.Attempts);
     }
 
+    [TestMethod]
+    public void RetryFailed_ReturnsFailedJobsToQueueWithFreshAttempts()
+    {
+        using var db = new TestDatabase();
+        long attachmentId = AddAttachment(db);
+        DateTimeOffset now = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        ProcessingJobRepository.Enqueue(db.Connection, "extract", attachmentId, maxAttempts: 1, availableAt: now);
+        ProcessingJob job = ProcessingJobRepository.LeaseNext(db.Connection, "worker-1", TimeSpan.FromMinutes(5), now)!;
+        ProcessingJobRepository.Fail(db.Connection, job.Id, "worker-1", "test-error", "Neutralny błąd", TimeSpan.Zero, now);
+
+        Assert.AreEqual(1, ProcessingJobRepository.RetryFailed(db.Connection));
+        Assert.AreEqual("pending", db.ScalarText("SELECT status FROM processing_jobs WHERE id=" + job.Id + ";"));
+        Assert.AreEqual(0, db.ScalarLong("SELECT attempts FROM processing_jobs WHERE id=" + job.Id + ";"));
+    }
+
+    [TestMethod]
+    public void RetryFailed_SkipsJobsCollidingWithActiveDuplicate()
+    {
+        using var db = new TestDatabase();
+        long attachmentId = AddAttachment(db);
+        DateTimeOffset now = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        ProcessingJobRepository.Enqueue(db.Connection, "extract", attachmentId, maxAttempts: 1, availableAt: now);
+        ProcessingJob extract = ProcessingJobRepository.LeaseNext(db.Connection, "worker-1", TimeSpan.FromMinutes(5), now)!;
+        ProcessingJobRepository.Fail(db.Connection, extract.Id, "worker-1", "test-error", "Neutralny błąd", TimeSpan.Zero, now);
+        ProcessingJobRepository.Enqueue(db.Connection, "ocr", attachmentId, maxAttempts: 1, availableAt: now);
+        ProcessingJob ocr = ProcessingJobRepository.LeaseNext(db.Connection, "worker-1", TimeSpan.FromMinutes(5), now)!;
+        ProcessingJobRepository.Fail(db.Connection, ocr.Id, "worker-1", "test-error", "Neutralny błąd", TimeSpan.Zero, now);
+        // Świeży aktywny duplikat extract — powrót failed-extract do 'pending' złamałby indeks.
+        Assert.IsTrue(ProcessingJobRepository.Enqueue(db.Connection, "extract", attachmentId, availableAt: now));
+
+        Assert.AreEqual(1, ProcessingJobRepository.RetryFailed(db.Connection));
+        Assert.AreEqual("failed", db.ScalarText("SELECT status FROM processing_jobs WHERE id=" + extract.Id + ";"));
+        Assert.AreEqual("pending", db.ScalarText("SELECT status FROM processing_jobs WHERE id=" + ocr.Id + ";"));
+    }
+
+    [TestMethod]
+    public void RetryFailed_RestoresOnlyNewestOfDuplicateFailedJobs()
+    {
+        using var db = new TestDatabase();
+        long attachmentId = AddAttachment(db);
+        DateTimeOffset now = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        ProcessingJobRepository.Enqueue(db.Connection, "extract", attachmentId, maxAttempts: 1, availableAt: now);
+        ProcessingJob first = ProcessingJobRepository.LeaseNext(db.Connection, "worker-1", TimeSpan.FromMinutes(5), now)!;
+        ProcessingJobRepository.Fail(db.Connection, first.Id, "worker-1", "test-error", "Neutralny błąd", TimeSpan.Zero, now);
+        ProcessingJobRepository.Enqueue(db.Connection, "extract", attachmentId, maxAttempts: 1, availableAt: now);
+        ProcessingJob second = ProcessingJobRepository.LeaseNext(db.Connection, "worker-1", TimeSpan.FromMinutes(5), now)!;
+        ProcessingJobRepository.Fail(db.Connection, second.Id, "worker-1", "test-error", "Neutralny błąd", TimeSpan.Zero, now);
+
+        Assert.AreNotEqual(first.Id, second.Id);
+        Assert.AreEqual(1, ProcessingJobRepository.RetryFailed(db.Connection));
+        Assert.AreEqual("failed", db.ScalarText("SELECT status FROM processing_jobs WHERE id=" + first.Id + ";"));
+        Assert.AreEqual("pending", db.ScalarText("SELECT status FROM processing_jobs WHERE id=" + second.Id + ";"));
+    }
+
+    [TestMethod]
+    public async Task LeaseMonitor_KeepsSlowJobLeasedUntilCompletion()
+    {
+        using var db = new TestDatabase();
+        long attachmentId = AddAttachment(db);
+        TimeSpan lease = TimeSpan.FromSeconds(1);
+        ProcessingJobRepository.Enqueue(db.Connection, "download", attachmentId);
+        ProcessingJob job = ProcessingJobRepository.LeaseNext(db.Connection, "worker-1", lease)!;
+
+        // Tak jak w Workerze: heartbeat odnawia dzierżawę na osobnym połączeniu,
+        // podczas gdy "pobieranie" trwa dłużej niż bazowa dzierżawa.
+        await using var monitor = ProcessingLeaseMonitor.Start(() =>
+        {
+            using var heartbeat = db.OpenAnotherConnection();
+            return ProcessingJobRepository.RenewLease(heartbeat, job.Id, "worker-1", lease);
+        }, lease, heartbeatInterval: TimeSpan.FromMilliseconds(100));
+        await Task.Delay(lease * 2.5);
+
+        monitor.AssertActive();
+        Assert.IsNull(ProcessingJobRepository.LeaseNext(db.Connection, "worker-2", TimeSpan.FromMinutes(5)));
+        await monitor.StopAsync();
+        Assert.IsTrue(ProcessingJobRepository.Complete(db.Connection, job.Id, "worker-1"));
+    }
+
     static long AddAttachment(TestDatabase db)
     {
         GmailAccountRecord account = db.AddAccount();

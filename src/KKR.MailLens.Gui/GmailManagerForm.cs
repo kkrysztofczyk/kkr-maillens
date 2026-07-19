@@ -249,7 +249,20 @@ sealed class GmailManagerForm : Form
             int memoryLimitMb = Math.Clamp(AppConfig.Load().WorkerMemoryLimitMb, 256, 16_384);
             using RestrictedWorkerProcess worker = RestrictedWorkerProcess.Start(executable, "--drain",
                 memoryLimitMb * 1024L * 1024L);
-            await worker.Process.WaitForExitAsync(cancellationToken);
+            try
+            {
+                await worker.Process.WaitForExitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                // Łagodne zatrzymanie: Worker oddaje bieżące zadanie (Abandon) i sam się kończy.
+                // Dopiero gdy nie zdąży w okresie łaski, Dispose zamyka job object i ubija drzewo.
+                worker.RequestStop();
+                using var grace = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                try { await worker.Process.WaitForExitAsync(grace.Token); }
+                catch (OperationCanceledException) { }
+                throw;
+            }
             return $"Worker zakończył działanie z kodem {worker.Process.ExitCode}.";
         });
     }

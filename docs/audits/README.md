@@ -60,6 +60,9 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Bezpośrednie uruchomienie Workera jest odrzucane, jeżeli proces nie ma ograniczonego tokenu.
 - Ctrl+C i utrata odblokowanej sesji anulują operacje zewnętrzne; zadanie wraca do kolejki bez zużycia próby.
 - Wszystkie typy zadań Workera mają niezależny heartbeat dzierżawy; utrata własności anuluje pracę, a ekstrakcja sprawdza ją ponownie przed zapisem wyniku.
+- Anulowanie Workera z GUI i pierwszy Ctrl+C w CLI wysyłają nazwany sygnał zatrzymania zamiast zabijać job object; Worker oddaje zadanie przez `Abandon`, a zamknięcie job object pozostaje awaryjnym domknięciem po okresie łaski.
+- `RetryFailed` pomija wiersze kolidujące z aktywnym duplikatem oraz przywraca tylko najnowszy z failed-duplikatów, więc masowy retry nie wycofuje się w całości przez `ux_processing_jobs_active_attachment`.
+- Monitor sesji Workera odróżnia jawne `LOCKED` od braku odpowiedzi agenta; chwilowo zajęte GUI (do ~15 s ciszy) nie wywołuje już fałszywego zamknięcia.
 - Harvest Outlooka w GUI reaguje na ręczną blokadę, wyjęcie YubiKey, wygaśnięcie TTL i blokadę przez IPC; przerwana partia korpusu jest wycofywana transakcyjnie.
 - Odzyskanie wygasłego lease zachowuje wcześniejszy kod diagnostyczny, jeżeli zadanie już go miało.
 - Działa lokalny pipeline FFmpeg → whisper.cpp z timestampami segmentów, FTS5 i sprzątaniem jawnych plików roboczych.
@@ -80,4 +83,4 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Wszystkie źródła zapisują `received`/`sent` w UTC (Gmail już wcześniej; Outlook `DateStr` konwertuje czas lokalny COM, IMAP formatuje `UtcDateTime`), więc filtry dat, `ORDER BY received` i okno kandydatów wyszukiwania semantycznego leżą na jednej osi czasu.
   - Kompromis cutover: świadomie **bez** migracji istniejących wierszy — per-wierszowy offset strefy jest nieznany, więc jednorazowa konwersja jest niewykonalna. Historyczne rekordy Outlook/IMAP zachowują czas lokalny do najbliższego harvestu tej samej wiadomości; upsert po stabilnej tożsamości źródłowej naprawia je przy kolejnym pobraniu. Odrzucono dodatkową znormalizowaną kolumnę jako nadmiarową wobec self-healing przez re-harvest.
 - Filtry `query`: `--from`/`--to` są walidowane (`yyyy-MM-dd` lub `yyyy-MM-dd HH:mm[:ss]`), górna granica całego dnia to data+1 (wykluczająca), a `--sender`/`--folder` escapują `%` `_` `\` z klauzulą `ESCAPE '\'`; pierwszy pozycyjny argument nie jest zjadany przez nieznane flagi, a separator `--` przekazuje frazę zaczynającą się od `--` (tak robi GUI).
-- Zestaw testów wzrósł z historycznych 20/31 do 124 testów.
+- Zestaw testów wzrósł z historycznych 20/31 do 172 testów.

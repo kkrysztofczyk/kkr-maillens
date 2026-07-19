@@ -24,10 +24,15 @@ sealed class RestrictedWorkerProcess : IDisposable
     const int StdErrorHandle = -12;
 
     readonly WorkerProcessLimit _limit;
+    readonly EventWaitHandle _stopSignal;
     public Process Process { get; }
 
-    RestrictedWorkerProcess(Process process, WorkerProcessLimit limit)
-    { Process = process; _limit = limit; }
+    RestrictedWorkerProcess(Process process, WorkerProcessLimit limit, EventWaitHandle stopSignal)
+    { Process = process; _limit = limit; _stopSignal = stopSignal; }
+
+    /// <summary>Prosi Workera o łagodne zakończenie (Abandon bieżącego zadania). Zamknięcie job
+    /// object w Dispose pozostaje awaryjnym domknięciem, gdy Worker nie zdąży w okresie łaski.</summary>
+    public void RequestStop() => _stopSignal.Set();
 
     public static RestrictedWorkerProcess Start(string executable, string arguments, long memoryBytes)
     {
@@ -62,6 +67,7 @@ sealed class RestrictedWorkerProcess : IDisposable
 
         Process? process = null;
         WorkerProcessLimit? limit = null;
+        EventWaitHandle? stopSignal = null;
         bool transferred = false;
         try
         {
@@ -69,16 +75,19 @@ sealed class RestrictedWorkerProcess : IDisposable
             _ = process.Handle;
             limit = WorkerProcessLimit.TryAttach(process, memoryBytes, out string? limitError)
                 ?? throw new Win32Exception(limitError ?? "Nie ustawiono ograniczeń procesu Workera.");
+            stopSignal = WorkerStopSignal.CreateForChild((int)information.ProcessId);
             if (ResumeThread(information.Thread) == uint.MaxValue)
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Nie wznowiono procesu Workera.");
-            var result = new RestrictedWorkerProcess(process, limit);
+            var result = new RestrictedWorkerProcess(process, limit, stopSignal);
             transferred = true;
             process = null;
             limit = null;
+            stopSignal = null;
             return result;
         }
         finally
         {
+            stopSignal?.Dispose();
             limit?.Dispose();
             if (process is not null)
             {
@@ -160,6 +169,7 @@ sealed class RestrictedWorkerProcess : IDisposable
 
     public void Dispose()
     {
+        _stopSignal.Dispose();
         _limit.Dispose();
         Process.Dispose();
     }
