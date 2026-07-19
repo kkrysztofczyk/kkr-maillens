@@ -11,6 +11,20 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 
 ## Status bieżący
 
+### Otwarte (do naprawy)
+
+- **Restart pełnej synchronizacji Gmail po wygaśnięciu page tokenu.** W `GmailSynchronizer.FullSync`
+  gałąź `catch (GmailPageTokenExpiredException)` ustawia `pageToken = null` i wywołuje `continue`
+  w pętli `do { … } while (!string.IsNullOrEmpty(pageToken))`. `continue` skacze do warunku pętli,
+  który po wyzerowaniu tokenu jest fałszywy, więc pętla kończy się bez ponownego pobrania stron.
+  Ponieważ `BeginFullSync(reset: true)` zdążył podbić generację, `PruneMissingMessages` usuwa cały
+  korpus nowej generacji, a `CompleteFullSync` raportuje sukces — wygaśnięcie tokenu w połowie
+  synchronizacji po cichu kasuje skrzynkę. Test regresyjny istnieje i jest wyłączony do czasu naprawy:
+  `GmailSynchronizerTests.ExpiredPageToken_RestartsFullSyncWithoutSkippingOrDuplicatingMessages`
+  (atrybut `[Ignore]`). Sugerowana naprawa: przebudować pętlę tak, aby restart ponownie wchodził
+  w ciało (np. `while (true)` z jawnym `break`, albo flaga `restart`), zachowując semantykę resetu.
+  Po naprawie zdjąć `[Ignore]`.
+
 ### Zamknięte lub nieaktualne
 
 - SDK 9.0.316 jest zainstalowane i zgodne z `global.json`.
