@@ -120,6 +120,10 @@ sealed class GmailManagerForm : Form
                 return (dashboard, ProcessingJobRepository.Counts(connection));
             });
 
+            // Odswiezanie nie jest sledzone w _operation, wiec OnFormClosing go nie blokuje - okno moglo
+            // zostac zamkniete i zwolnione w trakcie await; dotkniecie kontrolek rzuciloby ObjectDisposedException.
+            if (IsDisposed || Disposing) return;
+
             _accounts.BeginUpdate();
             try
             {
@@ -273,8 +277,11 @@ sealed class GmailManagerForm : Form
             _operation.Dispose();
             _operation = null;
             _gmailOperation = false;
-            SetBusy(false);
-            await RefreshDashboardAsync();
+            if (!IsDisposed && !Disposing) // zamkniecie inne niz UserClosing (np. wyjscie aplikacji) nie czeka na operacje
+            {
+                SetBusy(false);
+                await RefreshDashboardAsync();
+            }
         }
     }
 
@@ -303,8 +310,12 @@ sealed class GmailManagerForm : Form
         UseWaitCursor = busy;
     }
 
-    void Log(string message) =>
+    void Log(string message)
+    {
+        // Kontynuacje async moga dobiec juz po zamknieciu okna - log do zwolnionej kontrolki by rzucil.
+        if (IsDisposed || Disposing) return;
         _log.AppendText((_log.TextLength == 0 ? "" : Environment.NewLine) + message);
+    }
 
     static string SafeError(Exception exception) => exception switch
     {
