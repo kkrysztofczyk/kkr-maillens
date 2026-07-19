@@ -24,16 +24,7 @@ static class Imap
         client.Authenticate(acct.User, acct.GetPassword(sessionKeyHex));
 
         // foldery-cele (Inbox + reszta z personal namespace), pomijajac systemowe/dublujace
-        var targets = new List<IMailFolder>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        void Add(IMailFolder f) { if (!Skip(f) && seen.Add(f.FullName)) targets.Add(f); }
-        try { Add(client.Inbox); } catch { }
-        foreach (var ns in client.PersonalNamespaces)
-        {
-            IList<IMailFolder> roots;
-            try { roots = client.GetFolders(ns); } catch { continue; }
-            foreach (var root in roots) CollectRec(root, Add);
-        }
+        List<IMailFolder> targets = TargetFolders(client);
 
         // total (dla %) - otwarcie readonly daje Count
         int total = 0;
@@ -94,6 +85,23 @@ static class Imap
         if (onProgress != null) onProgress(done, total);
         try { client.Disconnect(true); } catch { }
         return totalMails;
+    }
+
+    /// <summary>Foldery pocztowe konta (Inbox + personal namespace) po odfiltrowaniu systemowych;
+    /// wspolne dla harvestu i ponownego wyszukiwania kopii wiadomosci przy pobieraniu zalacznika.</summary>
+    internal static List<IMailFolder> TargetFolders(ImapClient client)
+    {
+        var targets = new List<IMailFolder>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void Add(IMailFolder f) { if (!Skip(f) && seen.Add(f.FullName)) targets.Add(f); }
+        try { Add(client.Inbox); } catch { }
+        foreach (var ns in client.PersonalNamespaces)
+        {
+            IList<IMailFolder> roots;
+            try { roots = client.GetFolders(ns); } catch { continue; }
+            foreach (var root in roots) CollectRec(root, Add);
+        }
+        return targets;
     }
 
     static void CollectRec(IMailFolder folder, Action<IMailFolder> add)

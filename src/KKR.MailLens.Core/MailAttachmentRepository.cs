@@ -107,6 +107,10 @@ static class MailAttachmentRepository
         foreach (HarvestedAttachment attachment in message.Attachments)
         {
             if (string.IsNullOrWhiteSpace(attachment.ProviderAttachmentKey)) continue;
+            // Klucz (mail_entry_id,provider,provider_attachment_key) scala kopie tej samej wiadomosci
+            // (np. IMAP w wielu folderach) w jeden wiersz, wiec provider_message_key wskazuje OSTATNIO
+            // zebrana kopie. Swiadomy kompromis zamiast duplikowania metadanych i blobow per folder;
+            // gdy ta kopia zniknie, ImapAttachmentDownloader szuka innej kopii po Message-Id.
             using SqliteCommand command = Command(connection, transaction, """
                 INSERT INTO mail_attachments(mail_entry_id,provider,provider_message_key,
                     provider_attachment_key,part_id,filename,mime_type,size_bytes,content_id,is_inline,

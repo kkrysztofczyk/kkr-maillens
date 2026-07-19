@@ -66,7 +66,15 @@ sealed class Outlook : IDisposable
             _ns = _app!.GetNamespace("MAPI");
             _ready.TrySetResult(true);
         }
-        catch (Exception ex) { _startupError = ex; _ready.TrySetResult(true); return; }
+        catch (Exception ex)
+        {
+            // GetNamespace moze rzucic juz PO utworzeniu Outlook.Application - bez zwolnienia
+            // zostalby osierocony proces OUTLOOK.EXE.
+            _startupError = ex;
+            ReleaseComReferences();
+            _ready.TrySetResult(true);
+            return;
+        }
 
         try
         {
@@ -75,13 +83,15 @@ sealed class Outlook : IDisposable
                 try { job(); } catch { }
             }
         }
-        finally
-        {
-            if (_ns is object ns) Release(ns);
-            if (_app is object app) Release(app);
-            _ns = null;
-            _app = null;
-        }
+        finally { ReleaseComReferences(); }
+    }
+
+    void ReleaseComReferences()
+    {
+        if (_ns is object ns) Release(ns);
+        if (_app is object app) Release(app);
+        _ns = null;
+        _app = null;
     }
 
     public void Dispose()
@@ -149,69 +159,91 @@ sealed class Outlook : IDisposable
             var acc = new List<HarvestedMail>();
             int totalMails = 0;
 
-            // 1) zbierz foldery-cele ze wszystkich pasujacych skrzynek
+            // 1) zbierz foldery-cele ze wszystkich pasujacych skrzynek. Kazdy RCW (kolekcja Stores,
+            //    store, root, zebrane foldery) zwalniamy jawnie - te obiekty zyja przez caly harvest.
             var targets = new List<(dynamic Folder, string Path, string Leaf, string Sid, string Disp)>();
-            dynamic stores = ns.Stores;
-            int sn = (int)stores.Count;
-            for (int i = 1; i <= sn; i++)
+            dynamic? stores = null;
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                dynamic store = stores[i];
-                string name = Str(() => (string)store.DisplayName);
-                if (!string.IsNullOrWhiteSpace(storeContains) && !name.Contains(storeContains!, StringComparison.OrdinalIgnoreCase)) continue;
-                string sid = Str(() => (string)store.StoreID);
-                var excluded = ExcludedFolderIds(store);
-                var fs = new List<dynamic>();
-                try
+                stores = ns.Stores;
+                int sn = (int)stores!.Count;
+                for (int i = 1; i <= sn; i++)
                 {
-                    CollectMailFolders((object)store.GetRootFolder(), excluded, fs, true, include,
-                        cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    dynamic? store = null;
+                    try
+                    {
+                        store = stores[i];
+                        string name = Str(() => (string)store!.DisplayName);
+                        if (!string.IsNullOrWhiteSpace(storeContains) && !name.Contains(storeContains!, StringComparison.OrdinalIgnoreCase)) continue;
+                        string sid = Str(() => (string)store!.StoreID);
+                        var excluded = ExcludedFolderIds(store!);
+                        var fs = new List<dynamic>();
+                        dynamic? root = null;
+                        try
+                        {
+                            root = store!.GetRootFolder();
+                            CollectMailFolders((object)root!, excluded, fs, true, include,
+                                cancellationToken);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            foreach (dynamic f in fs) Release((object)f);
+                            throw;
+                        }
+                        catch { }
+                        finally { if (root is object r) Release(r); }
+                        foreach (dynamic f in fs)
+                        {
+                            string leaf = Str(() => (string)f.Name);
+                            targets.Add((f, Str(() => (string)f.FolderPath), leaf, sid, $"{name} / {leaf}"));
+                        }
+                    }
+                    finally { if (store is object s) Release(s); }
                 }
-                catch (OperationCanceledException) { throw; }
-                catch { }
-                foreach (dynamic f in fs)
+
+                // 2) policz ile elementow planujemy przeskanowac (baza dla procentow). Zwalniamy RCW kolekcji
+                //    Items zaraz po odczycie Count - inaczej wyciek jednej kolekcji COM na kazdy folder.
+                int total = 0;
+                foreach (var t in targets)
                 {
-                    string leaf = Str(() => (string)f.Name);
-                    targets.Add((f, Str(() => (string)f.FolderPath), leaf, sid, $"{name} / {leaf}"));
+                    cancellationToken.ThrowIfCancellationRequested();
+                    dynamic? items = null;
+                    try { items = t.Folder.Items; total += Math.Min((int)items.Count, maxPerFolder); }
+                    catch { }
+                    finally { if (items != null) Release((object)items); }
                 }
-            }
 
-            // 2) policz ile elementow planujemy przeskanowac (baza dla procentow). Zwalniamy RCW kolekcji
-            //    Items zaraz po odczycie Count - inaczej wyciek jednej kolekcji COM na kazdy folder.
-            int total = 0;
-            foreach (var t in targets)
-            {
+                // 3) skanuj; postep (zeskanowane/total) + flush porcjami
+                int scanned = 0;
+                Action onScanned = () =>
+                {
+                    scanned++;
+                    if (onProgress != null && scanned % 100 == 0) onProgress(scanned, total);
+                };
+                Action onAdded = () =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    totalMails++;
+                    if (acc.Count >= batchSize) { flush(acc); acc.Clear(); }
+                };
+                foreach (var t in targets)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    onFolder(t.Disp);
+                    ScanFolder(t.Folder, t.Path, t.Leaf, t.Sid, from, maxPerFolder, acc,
+                        onScanned, onAdded, cancellationToken);
+                }
                 cancellationToken.ThrowIfCancellationRequested();
-                dynamic? items = null;
-                try { items = t.Folder.Items; total += Math.Min((int)items.Count, maxPerFolder); }
-                catch { }
-                finally { if (items != null) Release((object)items); }
+                if (acc.Count > 0) flush(acc);
+                if (onProgress != null) onProgress(scanned, total);
+                return totalMails;
             }
-
-            // 3) skanuj; postep (zeskanowane/total) + flush porcjami
-            int scanned = 0;
-            Action onScanned = () =>
+            finally
             {
-                scanned++;
-                if (onProgress != null && scanned % 100 == 0) onProgress(scanned, total);
-            };
-            Action onAdded = () =>
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                totalMails++;
-                if (acc.Count >= batchSize) { flush(acc); acc.Clear(); }
-            };
-            foreach (var t in targets)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                onFolder(t.Disp);
-                ScanFolder(t.Folder, t.Path, t.Leaf, t.Sid, from, maxPerFolder, acc,
-                    onScanned, onAdded, cancellationToken);
+                foreach (var t in targets) Release((object)t.Folder);
+                if (stores is object storeCollection) Release(storeCollection);
             }
-            cancellationToken.ThrowIfCancellationRequested();
-            if (acc.Count > 0) flush(acc);
-            if (onProgress != null) onProgress(scanned, total);
-            return totalMails;
         });
     }
 
@@ -221,8 +253,10 @@ sealed class Outlook : IDisposable
         var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (int t in new[] { 3, 4, 16, 23 })
         {
-            try { dynamic f = store.GetDefaultFolder(t); string id = (string)f.EntryID; if (!string.IsNullOrEmpty(id)) ids.Add(id); }
+            dynamic? f = null;
+            try { f = store.GetDefaultFolder(t); string id = (string)f!.EntryID; if (!string.IsNullOrEmpty(id)) ids.Add(id); }
             catch { }
+            finally { if (f is object folder) Release(folder); }
         }
         return ids;
     }
@@ -245,27 +279,43 @@ sealed class Outlook : IDisposable
 
     // Foldery pocztowe (DefaultItemType==0) poza: root, wykluczonymi defaultami, systemowymi/ukrytymi
     // i nazwami z blocklisty. Kazde wykluczenie ucina cale poddrzewo.
-    static void CollectMailFolders(object folderObj, HashSet<string> excluded, List<dynamic> into,
+    // Zwraca true, gdy folder trafil do `into` (wtedy RCW zwalnia wlasciciel listy po skanowaniu);
+    // w przeciwnym razie RCW odwiedzonego dziecka zwalnia petla ponizej.
+    static bool CollectMailFolders(object folderObj, HashSet<string> excluded, List<dynamic> into,
         bool isRoot, HashSet<string>? include = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         dynamic folder = folderObj;
         string eid = ""; try { eid = (string)folder.EntryID; } catch { }
-        if (eid.Length > 0 && excluded.Contains(eid)) return; // Deleted/Drafts/Junk/Outbox + poddrzewo
+        if (eid.Length > 0 && excluded.Contains(eid)) return false; // Deleted/Drafts/Junk/Outbox + poddrzewo
         string name = Str(() => (string)folder.Name).Trim();
-        if (!isRoot && BlockedNames.Contains(name)) return;   // systemowe/szum + poddrzewo
-        if (IsHidden(folder)) return;                          // ukryte + poddrzewo
+        if (!isRoot && BlockedNames.Contains(name)) return false;   // systemowe/szum + poddrzewo
+        if (IsHidden(folder)) return false;                          // ukryte + poddrzewo
         bool wanted = include == null || include.Contains(name); // include => tylko wskazane nazwy
-        if (!isRoot && wanted && Int(() => (int)folder.DefaultItemType, -1) == 0) into.Add(folder);
+        bool kept = false;
+        if (!isRoot && wanted && Int(() => (int)folder.DefaultItemType, -1) == 0) { into.Add(folder); kept = true; }
+        dynamic? subs = null;
         try
         {
-            dynamic subs = folder.Folders;
-            int n = (int)subs.Count;
+            subs = folder.Folders;
+            int n = (int)subs!.Count;
             for (int i = 1; i <= n; i++)
-                CollectMailFolders((object)subs[i], excluded, into, false, include, cancellationToken);
+            {
+                dynamic? child = null;
+                bool childKept = false;
+                try
+                {
+                    child = subs[i];
+                    childKept = CollectMailFolders((object)child!, excluded, into, false, include,
+                        cancellationToken);
+                }
+                finally { if (child is object c && !childKept) Release(c); }
+            }
         }
         catch (OperationCanceledException) { throw; }
         catch { }
+        finally { if (subs is object collection) Release(collection); }
+        return kept;
     }
 
     static bool IsHidden(dynamic folder)
@@ -279,48 +329,46 @@ sealed class Outlook : IDisposable
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        dynamic items;
-        try { items = folder.Items; } catch { return; }
-        bool sorted = true;
-        try { items.Sort("[ReceivedTime]", true); } catch { sorted = false; }
-        int scanned = 0;
-        dynamic? it = null; try { it = items.GetFirst(); } catch { }
-        while (it != null && scanned < maxPerFolder)
+        // Jeden try/finally gwarantuje zwolnienie kolekcji Items i biezacego elementu na KAZDEJ
+        // sciezce wyjscia (anulowanie, wyjatek z callbackow postepu/flush, koniec skanu).
+        dynamic? items = null, it = null;
+        try
         {
-            if (cancellationToken.IsCancellationRequested)
+            try { items = folder.Items; } catch { return; }
+            bool sorted = true;
+            try { items!.Sort("[ReceivedTime]", true); } catch { sorted = false; }
+            int scanned = 0;
+            try { it = items!.GetFirst(); } catch { }
+            while (it != null && scanned < maxPerFolder)
             {
-                Release((object)it!);
-                Release((object)items);
                 cancellationToken.ThrowIfCancellationRequested();
-            }
-            scanned++;
-            onScanned?.Invoke(); // licznik postepu: kazdy przejrzany element
-            dynamic cur = it!;
-            try
-            {
-                if (IsMail(cur))
+                scanned++;
+                onScanned?.Invoke(); // licznik postepu: kazdy przejrzany element
+                dynamic cur = it!;
+                try
                 {
-                    DateTime? recv = null; try { recv = (DateTime)cur.ReceivedTime; } catch { }
-                    if (from is { } f && recv is { } r0 && r0 < f)
+                    if (IsMail(cur))
                     {
-                        if (sorted) { Release(cur); it = null; break; }  // desc sort -> koniec
-                        it = Next(items, cur); continue;        // brak sortu -> pomin, skanuj dalej
+                        DateTime? recv = null; try { recv = (DateTime)cur.ReceivedTime; } catch { }
+                        if (from is { } f && recv is { } r0 && r0 < f)
+                        {
+                            if (sorted) break;               // desc sort -> koniec
+                            it = Next(items!, cur); continue; // brak sortu -> pomin, skanuj dalej
+                        }
+                        acc.Add(Read(cur, path, leaf, sid));
+                        onAdded?.Invoke();
                     }
-                    acc.Add(Read(cur, path, leaf, sid));
-                    onAdded?.Invoke();
                 }
+                catch (OperationCanceledException) { throw; }
+                catch { }
+                it = Next(items!, cur);
             }
-            catch (OperationCanceledException)
-            {
-                Release(cur);
-                Release((object)items);
-                throw;
-            }
-            catch { }
-            it = Next(items, cur);
         }
-        if (it is object remaining) Release(remaining);
-        Release((object)items);
+        finally
+        {
+            if (it is object remaining) Release(remaining);
+            if (items is object collection) Release(collection);
+        }
     }
 
     static HarvestedMail Read(dynamic mail, string path, string leaf, string sid)

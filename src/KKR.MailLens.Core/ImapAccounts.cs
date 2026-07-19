@@ -27,6 +27,9 @@ sealed class ImapAccount
         finally { CryptographicOperations.ZeroMemory(bytes); }
     }
 
+    /// <summary>Zwraca hasło jako zarządzany string, bo MailKit Authenticate nie przyjmuje innej
+    /// formy - pełne wyzerowanie jest więc niemożliwe. Wywołuj inline w argumencie Authenticate
+    /// (bez zmiennych lokalnych ani logowania), aby maksymalnie skrócić życie referencji.</summary>
     public string GetPassword(string sessionKeyHex)
     {
         if (string.IsNullOrEmpty(PasswordProtected)) return "";
