@@ -67,13 +67,14 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Anulowanie Workera z GUI i pierwszy Ctrl+C w CLI wysyłają nazwany sygnał zatrzymania zamiast zabijać job object; Worker oddaje zadanie przez `Abandon`, a zamknięcie job object pozostaje awaryjnym domknięciem po okresie łaski.
 - `RetryFailed` pomija wiersze kolidujące z aktywnym duplikatem oraz przywraca tylko najnowszy z failed-duplikatów, więc masowy retry nie wycofuje się w całości przez `ux_processing_jobs_active_attachment`.
 - Monitor sesji Workera odróżnia jawne `LOCKED` od braku odpowiedzi agenta; chwilowo zajęte GUI (do ~15 s ciszy) nie wywołuje już fałszywego zamknięcia.
-- Harvest Outlooka w GUI reaguje na ręczną blokadę, wyjęcie YubiKey, wygaśnięcie TTL i blokadę przez IPC; przerwana partia korpusu jest wycofywana transakcyjnie.
+- Wspólny koordynator Gmail/IMAP/Outlook reaguje na ręczną blokadę, wyjęcie YubiKey, wygaśnięcie TTL i blokadę przez IPC; bieżące źródło jest anulowane, a wcześniej zatwierdzone porcje pozostają w korpusie.
 - Odzyskanie wygasłego lease zachowuje wcześniejszy kod diagnostyczny, jeżeli zadanie już go miało.
 - Działa lokalny pipeline FFmpeg → whisper.cpp z timestampami segmentów, FTS5 i sprzątaniem jawnych plików roboczych.
 - Garbage collection usuwa wyłącznie bloby bez aktywnych referencji, zachowuje współdzielone bloby i pomija dane używane przez działające zadania.
 - Usunięcie osieroconego blobu czyści nieaktualne dokumenty, segmenty, FTS i zadania usuniętych załączników; `blob-gc --dry-run` udostępnia podgląd.
 - Test odbudowy `content_fts` potwierdza idempotentne odtworzenie indeksu z zapisanych segmentów.
-- GUI ma panel kont Gmail z OAuth, synchronizacją pełną/przyrostową, anulowaniem, statusem kolejki i uruchamianiem Workera.
+- GUI ma wspólny ekran `Skrzynki` dla Gmail, IMAP i podłączonych magazynów Outlook/PST, sekwencyjną trwałą kolejkę, pełny/przyrostowy import, anulowanie i automatyczne uruchamianie Workera.
+- Kolejka pozwala dopisywać źródła podczas importu, odzyskuje przerwany przebieg i pokazuje osobne etapy pobierania, ekstrakcji, OCR, transkrypcji oraz indeksowania.
 - Wyszukiwanie GUI przełącza się między wiadomościami, `content_fts` albo łączy oba rodzaje wyników.
 - IMAP zapisuje locator konto/folder/UIDVALIDITY/UID/część MIME, a Worker pobiera i przetwarza załącznik przez MailKit z limitem pamięci.
 - Outlook zapisuje StoreID/EntryID/indeks załącznika; broker COM działa na dedykowanym STA i sprząta izolowany plaintext workspace.
@@ -87,4 +88,4 @@ ustaleń, ale przed zmianą zawsze weryfikujemy problem względem aktualnego `ma
 - Wszystkie źródła zapisują `received`/`sent` w UTC (Gmail już wcześniej; Outlook `DateStr` konwertuje czas lokalny COM, IMAP formatuje `UtcDateTime`), więc filtry dat, `ORDER BY received` i okno kandydatów wyszukiwania semantycznego leżą na jednej osi czasu.
   - Kompromis cutover: świadomie **bez** migracji istniejących wierszy — per-wierszowy offset strefy jest nieznany, więc jednorazowa konwersja jest niewykonalna. Historyczne rekordy Outlook/IMAP zachowują czas lokalny do najbliższego harvestu tej samej wiadomości; upsert po stabilnej tożsamości źródłowej naprawia je przy kolejnym pobraniu. Odrzucono dodatkową znormalizowaną kolumnę jako nadmiarową wobec self-healing przez re-harvest.
 - Filtry `query`: `--from`/`--to` są walidowane (`yyyy-MM-dd` lub `yyyy-MM-dd HH:mm[:ss]`), górna granica całego dnia to data+1 (wykluczająca), a `--sender`/`--folder` escapują `%` `_` `\` z klauzulą `ESCAPE '\'`; pierwszy pozycyjny argument nie jest zjadany przez nieznane flagi, a separator `--` przekazuje frazę zaczynającą się od `--` (tak robi GUI).
-- Zestaw testów wzrósł z historycznych 20/31 do 200 testów.
+- Zestaw testów wzrósł z historycznych 20/31 do ponad 240 testów.

@@ -4,7 +4,7 @@ KKR MailLens tworzy lokalny, szyfrowany indeks poczty do wyszukiwania pełnoteks
 
 ## Stan projektu
 
-Aktualnie działa import Outlook/IMAP oraz pełna i przyrostowa synchronizacja Gmail API z CLI i GUI. Pipeline Gmail obejmuje trwałą kolejkę, pobieranie załączników, szyfrowany i deduplikowany magazyn blobów, ekstrakcję TXT/HTML/PDF/DOCX/XLSX/PPTX, lokalny OCR obrazów i mieszanych PDF-ów, transkrypcję audio/wideo przez FFmpeg i whisper.cpp oraz osobny indeks `content_fts`.
+Aktualnie działa import Outlook/IMAP oraz pełna i przyrostowa synchronizacja Gmail API z CLI i GUI. Wspólny pipeline źródeł obejmuje trwałą kolejkę wielu skrzynek, sekwencyjny import, pobieranie załączników, szyfrowany i deduplikowany magazyn blobów, ekstrakcję TXT/HTML/PDF/DOCX/XLSX/PPTX, lokalny OCR obrazów i mieszanych PDF-ów, transkrypcję audio/wideo przez FFmpeg i whisper.cpp oraz osobny indeks `content_fts`.
 
 Dostępne jest opcjonalne wyszukiwanie semantyczne i hybrydowe przez lokalny endpoint. Dokładne wyszukiwanie FTS5 pozostaje podstawą projektu i nie jest zastępowane przez model. Bieżący status ustaleń technicznych znajduje się w [indeksie audytów](docs/audits/README.md).
 
@@ -29,14 +29,14 @@ dotnet publish src\KKR.MailLens.Gui\KKR.MailLens.Gui.csproj -c Release -o run -p
 dotnet publish src\KKR.MailLens.Worker\KKR.MailLens.Worker.csproj -c Release -o run -p:DebugType=None -p:DebugSymbols=false
 ```
 
-Solution składa się z biblioteki `src\KKR.MailLens.Core`, aplikacji CLI `src\KKR.MailLens`, aplikacji WinForms `src\KKR.MailLens.Gui`, osobnego procesu `src\KKR.MailLens.Worker` oraz projektu testowego. CLI, GUI i Worker korzystają z tego samego rdzenia przez `ProjectReference`; nie linkują ręcznie plików źródłowych. Assembly wykonywalne nazywają się `KKR.MailLens`, `KKR.MailLens.Gui` i `KKR.MailLens.Worker`.
+Solution składa się z biblioteki `src\KKR.MailLens.Core`, aplikacji CLI `src\KKR.MailLens`, aplikacji WinForms `src\KKR.MailLens.Gui`, osobnego procesu `src\KKR.MailLens.Worker` oraz projektu testowego. CLI, GUI i Worker korzystają z tego samego rdzenia przez `ProjectReference`; nie linkują ręcznie plików źródłowych. Assembly wykonywalne nazywają się `KKR.MailLens`, `KKR.MailLens.Gui` i `KKR.MailLens.Worker`. Szczegóły wspólnej kolejki opisuje [architektura importu skrzynek](docs/MAILBOX-PIPELINE.md).
 
 ## Szybki start
 
 1. Uruchom `run\KKR.MailLens.Gui.exe`.
 2. Ustaw PIN i zainicjuj zaszyfrowaną bazę.
 3. Odblokuj sesję w GUI.
-4. Zaimportuj wiadomości przyciskiem `Harvest`, przez IMAP albo przez Gmail API.
+4. Otwórz `Skrzynki`, dodaj Gmail, IMAP albo magazyn podłączony w Outlook i zaznacz źródła do importu.
 5. Wyszukuj z GUI lub CLI.
 
 ```powershell
@@ -44,6 +44,18 @@ run\KKR.MailLens.exe status
 run\KKR.MailLens.exe query "neutralny tekst"
 run\KKR.MailLens.exe stats
 ```
+
+## Ekran Skrzynki
+
+Przycisk `Skrzynki` w głównym oknie otwiera wspólny panel konfiguracji i importu. Z menu `Dodaj skrzynkę` można:
+
+- połączyć Gmail przez OAuth 2.0;
+- dodać IMAP z SSL/TLS albo STARTTLS; hasło jest zabezpieczane kluczem aktywnej sesji i Windows DPAPI;
+- wybrać skrzynkę, OST lub podmontowany PST udostępniony przez Outlook. Aplikacja nie montuje plików danych i nie importuje ich z pominięciem Outlooka.
+
+Do jednej kolejki można dodać wiele źródeł. Skrzynki są importowane kolejno, a po zakończeniu fazy pobierania aplikacja automatycznie uruchamia ograniczony proces Workera dla etapów pobierania załączników, ekstrakcji, OCR, transkrypcji i opcjonalnych embeddingów. Panel pokazuje postęp każdej skrzynki oraz licznik każdego etapu przetwarzania. Nową skrzynkę można skonfigurować i dopisać, gdy faza importu nadal trwa.
+
+Kolejka, jej kolejność, postęp, błędy i wybór `Pełny import` są zapisane w SQLCipher. Po ponownym otwarciu panel odzyskuje przerwany import. Anulowanie albo zablokowanie sesji bezpiecznie zatrzymuje bieżące źródło i Worker; już zatwierdzone porcje pozostają w korpusie.
 
 Przykładowa konfiguracja IMAP używa wyłącznie zarezerwowanej domeny testowej; wartości trzeba zastąpić konfiguracją własnego serwera:
 
@@ -58,7 +70,7 @@ run\KKR.MailLens.exe query-content "neutralny tekst"
 
 Integracja Gmail korzysta wyłącznie z oficjalnego Gmail API i zakresu `gmail.readonly`. Aplikacja otwiera logowanie w systemowej przeglądarce, nie przyjmuje hasła do Gmaila i nie uruchamia własnego serwera poza tymczasowym odbiornikiem OAuth na lokalnym adresie loopback.
 
-Zarządzanie kontami i synchronizacja Gmail są dostępne w CLI oraz w panelu otwieranym przyciskiem `Gmail` w GUI. Panel pokazuje konta, postęp synchronizacji, stan kolejki i umożliwia uruchomienie Workera. Pole wyszukiwania GUI pozwala wybrać wiadomości, zawartość załączników i transkrypcji, oba indeksy dokładne albo opcjonalny ranking hybrydowy.
+Zarządzanie kontami i synchronizacja Gmail są dostępne w CLI oraz we wspólnym panelu `Skrzynki` w GUI. Panel pokazuje źródła, postęp synchronizacji i stan kolejki, a po imporcie automatycznie uruchamia Workera. Pole wyszukiwania GUI pozwala wybrać wiadomości, zawartość załączników i transkrypcji, oba indeksy dokładne albo opcjonalny ranking hybrydowy.
 
 Zakres `gmail.readonly` jest klasyfikowany jako restricted. Publicznie udostępniany klient OAuth może wymagać weryfikacji zgodnie z bieżącymi zasadami Google; repozytorium nie zawiera wspólnego identyfikatora ani sekretu klienta.
 

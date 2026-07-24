@@ -7,14 +7,22 @@ KKR MailLens to lokalny, szyfrowany indeks poczty z wyszukiwaniem FTS5. Klucz ak
 1. Uruchom `run\KKR.MailLens.Gui.exe`.
 2. Wpisz PIN, opcjonalnie włącz drugi składnik i kliknij `Inicjuj`.
 3. Kliknij `Odblokuj`.
-4. Kliknij `Harvest`, aby pobrać pocztę ze źródła desktopowego.
-5. Użyj pola `Szukaj` i wybierz zakres `Wiadomości`, `Załączniki`, opcjonalne `Hybrydowe` albo `Wszystko`; alerty automatyczne są domyślnie odsiewane według lokalnych reguł.
+4. Kliknij `Skrzynki`, a następnie `Dodaj skrzynkę` i wybierz Gmail, IMAP albo Outlook.
+5. Zaznacz jedną lub kilka skrzynek i kliknij `Importuj wybrane` albo `Importuj wszystkie`.
+6. Obserwuj kolejno postęp importu oraz etapy `Pobieranie`, `Ekstrakcja`, `OCR`, `Transkrypcja` i `Indeks`.
+7. Użyj pola `Szukaj` i wybierz zakres `Wiadomości`, `Załączniki`, opcjonalne `Hybrydowe` albo `Wszystko`; alerty automatyczne są domyślnie odsiewane według lokalnych reguł.
 
-`Harvest` zapisuje także metadane załączników Outlook. Zablokowanie lub wygaśnięcie sesji anuluje aktywny import; bieżąca partia jest wycofywana, a wcześniej zapisane partie pozostają w korpusie. Uruchom `run\KKR.MailLens.exe processing-run`, aby Worker pobrał załączniki przez dedykowany wątek STA, zaszyfrował je i zindeksował. Jawny plik wymagany przez API Outlooka jest usuwany z izolowanego katalogu roboczego przed zakończeniem zadania.
+Skrzynki są importowane sekwencyjnie. Podczas importu można dodać następne źródło do tej samej kolejki. Po pobraniu poczty GUI automatycznie uruchamia Workera, który szyfruje i indeksuje załączniki. Kolejka, postęp oraz wybór `Pełny import` są trwałe i zostaną odzyskane po ponownym otwarciu panelu. Zablokowanie lub wygaśnięcie sesji anuluje aktywny przebieg; wcześniej zatwierdzone porcje pozostają w korpusie.
+
+## Outlook
+
+W ekranie `Skrzynki` wybierz `Dodaj skrzynkę` → `Outlook`. Lista zawiera skrzynki i pliki danych aktualnie podłączone w desktopowym Outlooku. `Wskaż PST` tylko odnajduje wskazany plik na tej liście — jeśli PST nie jest podmontowany, najpierw podłącz go w Outlook i odśwież widok. KKR MailLens nie montuje PST samodzielnie.
+
+Import zapisuje `StoreID`, `EntryID` i metadane załączników. Worker pobiera załącznik przez dedykowany wątek STA, szyfruje go i przekazuje do dalszego przetwarzania. Jawny plik wymagany przez API Outlooka jest usuwany z izolowanego katalogu roboczego przed zakończeniem zadania.
 
 ## IMAP
 
-Poniższe wartości są neutralnymi placeholderami z domeny `.invalid`:
+Najprościej dodać konto przez `Skrzynki` → `Dodaj skrzynkę` → `IMAP`. Formularz obsługuje SSL/TLS i STARTTLS, limit wiadomości na folder oraz opcjonalną datę początkową. Poniższe polecenia CLI używają neutralnych placeholderów z domeny `.invalid`:
 
 ```powershell
 run\KKR.MailLens.exe imap-add --host imap.example.invalid --user sender@example.invalid
@@ -27,9 +35,9 @@ Import IMAP zapisuje metadane i trwałe identyfikatory części MIME. Worker pob
 
 ## Gmail przez OAuth
 
-Włącz Gmail API i utwórz klienta OAuth typu Desktop app. Plik konfiguracji zapisz poza repozytorium jako `%LOCALAPPDATA%\kkr-maillens\gmail-oauth-client.json` albo wskaż zmienną `KKR_MAILLENS_GMAIL_OAUTH_CONFIG`. Po odblokowaniu GUI:
+Włącz Gmail API i utwórz klienta OAuth typu Desktop app. Plik konfiguracji zapisz poza repozytorium jako `%LOCALAPPDATA%\kkr-maillens\gmail-oauth-client.json` albo wskaż zmienną `KKR_MAILLENS_GMAIL_OAUTH_CONFIG`. Po odblokowaniu GUI wybierz `Skrzynki` → `Dodaj skrzynkę` → `Gmail — OAuth 2.0`, a potem uruchom import wybranego konta.
 
-Kliknij `Gmail` w głównym oknie, aby połączyć lub odłączyć konto, wykonać synchronizację przyrostową albo pełną, obserwować postęp i kolejkę oraz uruchomić Workera. Te same operacje pozostają dostępne w CLI:
+Synchronizacja przyrostowa jest domyślna. Opcja `Pełny import` jest zapisywana razem z kolejką, więc zachowuje znaczenie również po wznowieniu. Te same operacje pozostają dostępne w CLI:
 
 ```powershell
 run\KKR.MailLens.exe account add gmail
