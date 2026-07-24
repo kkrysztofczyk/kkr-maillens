@@ -236,6 +236,26 @@ static class MailboxImportRunRepository
         return result;
     }
 
+    public static MailboxImportSourceRecord? FindLatestSourceRun(
+        SqliteConnection connection,
+        long mailboxSourceId)
+    {
+        if (mailboxSourceId <= 0)
+            throw new ArgumentOutOfRangeException(nameof(mailboxSourceId));
+        using var command = Command(connection, null, """
+            SELECT id,run_id,mailbox_source_id,source_provider,source_external_key,
+                   source_display_name,source_credential_ref,source_settings_json,
+                   queue_position,status,phase,processed,total,inserted,updated,
+                   deleted,errors,last_error_code,started_at,completed_at
+            FROM mailbox_import_run_sources
+            WHERE mailbox_source_id=$source
+            ORDER BY id DESC
+            LIMIT 1;
+            """, ("$source", mailboxSourceId));
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? ReadSource(reader) : null;
+    }
+
     public static bool Start(SqliteConnection connection, long runId)
     {
         using var command = Command(connection, null, """
