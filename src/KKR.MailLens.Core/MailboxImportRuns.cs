@@ -28,6 +28,7 @@ sealed record MailboxImportRunRecord(
     MailboxImportRunStatus Status,
     bool CancelRequested,
     string? LastErrorCode,
+    long ProcessingJobBaselineId,
     string CreatedAt,
     string? StartedAt,
     string? ImportCompletedAt,
@@ -94,8 +95,12 @@ static class MailboxImportRunRepository
 
         long runId;
         using (var insertRun = Command(connection, transaction, """
-            INSERT INTO mailbox_import_runs(status,cancel_requested,created_at)
-            VALUES('queued',0,$now);
+            INSERT INTO mailbox_import_runs(
+                status,cancel_requested,processing_job_baseline_id,created_at)
+            VALUES(
+                'queued',0,
+                COALESCE((SELECT MAX(id) FROM processing_jobs),0),
+                $now);
             """, ("$now", now)))
         {
             insertRun.ExecuteNonQuery();
@@ -192,7 +197,7 @@ static class MailboxImportRunRepository
     public static MailboxImportRunRecord? Find(SqliteConnection connection, long runId)
     {
         using var command = Command(connection, null, """
-            SELECT id,status,cancel_requested,last_error_code,created_at,started_at,
+            SELECT id,status,cancel_requested,last_error_code,processing_job_baseline_id,created_at,started_at,
                    import_completed_at,completed_at
             FROM mailbox_import_runs
             WHERE id=$id
@@ -205,7 +210,7 @@ static class MailboxImportRunRepository
     public static MailboxImportRunRecord? FindActive(SqliteConnection connection)
     {
         using var command = Command(connection, null, """
-            SELECT id,status,cancel_requested,last_error_code,created_at,started_at,
+            SELECT id,status,cancel_requested,last_error_code,processing_job_baseline_id,created_at,started_at,
                    import_completed_at,completed_at
             FROM mailbox_import_runs
             WHERE status IN ('queued','importing','processing')
@@ -395,7 +400,8 @@ static class MailboxImportRunRepository
 
     public static MailboxImportRunStatus? CompleteProcessing(
         SqliteConnection connection,
-        long runId)
+        long runId,
+        bool processingHadErrors = false)
     {
         using var transaction = connection.BeginTransaction();
         MailboxImportRunRecord? run = FindRun(connection, transaction, runId);
@@ -412,15 +418,21 @@ static class MailboxImportRunRepository
 
         MailboxImportRunStatus status = run.CancelRequested
             ? MailboxImportRunStatus.Cancelled
-            : failures == 0
+            : failures == 0 && !processingHadErrors
                 ? MailboxImportRunStatus.Completed
                 : MailboxImportRunStatus.CompletedWithErrors;
         using (var complete = Command(connection, transaction, """
             UPDATE mailbox_import_runs
-            SET status=$status,completed_at=$now
+            SET status=$status,
+                last_error_code=CASE
+                    WHEN $processingErrors=1 THEN 'ProcessingErrors'
+                    ELSE last_error_code
+                END,
+                completed_at=$now
             WHERE id=$run;
             """,
             ("$status", RunStatusName(status)),
+            ("$processingErrors", processingHadErrors ? 1 : 0),
             ("$now", Now()),
             ("$run", runId)))
             complete.ExecuteNonQuery();
@@ -570,7 +582,7 @@ static class MailboxImportRunRepository
         long runId)
     {
         using var command = Command(connection, transaction, """
-            SELECT id,status,cancel_requested,last_error_code,created_at,started_at,
+            SELECT id,status,cancel_requested,last_error_code,processing_job_baseline_id,created_at,started_at,
                    import_completed_at,completed_at
             FROM mailbox_import_runs
             WHERE id=$id
@@ -585,10 +597,11 @@ static class MailboxImportRunRepository
         ParseRunStatus(reader.GetString(1)),
         reader.GetInt64(2) != 0,
         reader.IsDBNull(3) ? null : reader.GetString(3),
-        reader.GetString(4),
-        reader.IsDBNull(5) ? null : reader.GetString(5),
+        reader.GetInt64(4),
+        reader.GetString(5),
         reader.IsDBNull(6) ? null : reader.GetString(6),
-        reader.IsDBNull(7) ? null : reader.GetString(7));
+        reader.IsDBNull(7) ? null : reader.GetString(7),
+        reader.IsDBNull(8) ? null : reader.GetString(8));
 
     static MailboxImportSourceRecord ReadSource(SqliteDataReader reader) => new(
         reader.GetInt64(0),
