@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 using System.Windows.Forms;
 using KKR.MailLens;
@@ -7,7 +6,7 @@ namespace KKR.MailLens.Gui;
 
 /// <summary>
 /// Maly cockpit nad rdzeniem CLI: odblokuj (PIN + YubiKey), status z odliczaniem, zablokuj,
-/// szukanie (FTS) i harvest. Cala logika kryptograficzna/dostepu to te same klasy co w CLI
+/// szukanie (FTS) i zarządzanie skrzynkami. Cala logika kryptograficzna/dostepu to te same klasy co w CLI
 /// (Crypto/Session/Db/Query/YubiKey/Outlook) - GUI tylko je orkiestruje.
 /// </summary>
 sealed class MainForm : Form
@@ -23,10 +22,8 @@ sealed class MainForm : Form
     readonly ComboBox _searchKind = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 115, Margin = new Padding(4, 6, 0, 0) };
     readonly Button _searchBtn = Btn("Szukaj");
     readonly Button _statsBtn = Btn("Statystyki");
-    readonly ComboBox _range = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 90, Margin = new Padding(4, 6, 4, 0) };
-    readonly Button _harvestBtn = Btn("Harvest");
     readonly Button _rulesBtn = Btn("Reguły szumu");
-    readonly Button _gmailBtn = Btn("Gmail");
+    readonly Button _mailboxesBtn = Btn("Skrzynki");
 
     // Jednakowa szerokosc = przyciski tworza pionowe "tory"; staly rozmiar = brak drgania.
     const int BtnW = 100;
@@ -38,12 +35,10 @@ sealed class MainForm : Form
         Height = 28,
         Margin = new Padding(4, 4, 0, 4),
     };
-    readonly ProgressBar _prog = new() { Dock = DockStyle.Fill, Style = ProgressBarStyle.Continuous, Visible = false, Margin = new Padding(0, 2, 0, 2) };
     readonly TextBox _out = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false, Dock = DockStyle.Fill, Font = new Font("Consolas", 9), BackColor = Color.FromArgb(30, 30, 30), ForeColor = Color.Gainsboro };
     readonly System.Windows.Forms.Timer _tick = new() { Interval = 1000 };
     readonly Agent _agent = new();
     readonly NotifyIcon _tray = new() { Icon = System.Drawing.SystemIcons.Shield, Text = "KKR MailLens", Visible = false };
-    CancellationTokenSource? _activeHarvest;
     bool _reallyExit, _balloonShown;
     bool _busy; // straz przed nakladaniem operacji (np. Enter w _pin/_search) - SetBusy wylacza kontrolki, to jest pas i szelki
 
@@ -54,10 +49,9 @@ sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(900, 440);
 
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(8) };
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(8) };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 32)); // status
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 76)); // siatka kontrolek (STALA wysokosc - brak drgania)
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 20)); // progress bar
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // output
 
         root.Controls.Add(_status, 0, 0);
@@ -81,9 +75,7 @@ sealed class MainForm : Form
         _search.Anchor = AnchorStyles.Left | AnchorStyles.Right; _search.Margin = new Padding(0, 6, 0, 0);
         _yubi.Anchor = AnchorStyles.Left; _yubi.Margin = new Padding(6, 0, 0, 0);
         _ttl.Anchor = AnchorStyles.Left | AnchorStyles.Right; _ttl.Margin = new Padding(0, 6, 0, 0);
-        _range.Anchor = AnchorStyles.Left | AnchorStyles.Right; _range.Margin = new Padding(0, 6, 0, 0);
         _ttl.Items.AddRange(new object[] { "5h", "12h", "24h" }); _ttl.SelectedIndex = 0;
-        _range.Items.AddRange(new object[] { "3 dni", "Dzis", "Od ostatniego", "7 dni", "30 dni", "Ten rok", "Wszystko" }); _range.SelectedIndex = 0; // domyslnie 3 dni (zachodzi na siebie - brak dziur)
         _searchKind.Items.AddRange(new object[] { "Wiadomości", "Załączniki", "Hybrydowe", "Wszystko" }); _searchKind.SelectedIndex = 0;
 
         // srodek (col2): YubiKey w gorze, Szukaj+Statystyki w dole; reszta col2 to luz (Percent)
@@ -93,7 +85,7 @@ sealed class MainForm : Form
         searchMid.Controls.AddRange(new Control[] { _searchKind, _searchBtn, _statsBtn });
 
         // strefa przyciskow: rowne kolumny wypelniaja stale 320px -> obie grupy tej samej szerokosci
-        foreach (var b in new[] { _init, _unlock, _lock, _harvestBtn, _rulesBtn, _gmailBtn })
+        foreach (var b in new[] { _init, _unlock, _lock, _rulesBtn, _mailboxesBtn })
         { b.Anchor = AnchorStyles.Left | AnchorStyles.Right; b.Margin = new Padding(2, 4, 2, 4); }
         static TableLayoutPanel BtnZone(int cols)
         {
@@ -102,7 +94,7 @@ sealed class MainForm : Form
             return t;
         }
         var unlockZone = BtnZone(3); unlockZone.Controls.AddRange(new Control[] { _init, _unlock, _lock });
-        var searchZone = BtnZone(3); searchZone.Controls.AddRange(new Control[] { _harvestBtn, _gmailBtn, _rulesBtn });
+        var searchZone = BtnZone(2); searchZone.Controls.AddRange(new Control[] { _mailboxesBtn, _rulesBtn });
 
         grid.Controls.Add(Lab("PIN:"), 0, 0);
         grid.Controls.Add(_pin, 1, 0);
@@ -113,13 +105,10 @@ sealed class MainForm : Form
         grid.Controls.Add(Lab("Szukaj:"), 0, 1);
         grid.Controls.Add(_search, 1, 1);
         grid.Controls.Add(searchMid, 2, 1);
-        grid.Controls.Add(Lab("Zakres:"), 3, 1);
-        grid.Controls.Add(_range, 4, 1);
         grid.Controls.Add(searchZone, 5, 1);
 
         root.Controls.Add(grid, 0, 1);
-        root.Controls.Add(_prog, 0, 2);
-        root.Controls.Add(_out, 0, 3);
+        root.Controls.Add(_out, 0, 2);
         Controls.Add(root);
 
         _init.Click += async (_, _) => await DoInit();
@@ -127,8 +116,7 @@ sealed class MainForm : Form
         _lock.Click += (_, _) => LockSession("Zablokowano - klucz usunięty z RAM.");
         _searchBtn.Click += async (_, _) => await DoSearch();
         _statsBtn.Click += async (_, _) => await RunCapture(() => Query.Stats(RamSession.Key!), "statystyki...");
-        _harvestBtn.Click += async (_, _) => await DoHarvest();
-        _gmailBtn.Click += (_, _) => OpenGmail();
+        _mailboxesBtn.Click += (_, _) => OpenMailboxes();
         _rulesBtn.Click += async (_, _) => await OpenNoiseRules();
         _search.KeyDown += async (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await DoSearch(); } };
         _pin.KeyDown += async (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await DoUnlock(); } };
@@ -151,8 +139,8 @@ sealed class MainForm : Form
         RefreshMeta();
         RefreshStatus();
         _out.Text = (Setup.IsInitialized
-            ? "Gotowe. Odblokuj (PIN" + (Mode.Yubi ? " + wepnij YubiKey" : "") + "), potem Szukaj / Harvest."
-            : "Korpus niezainicjowany. Wpisz PIN, zaznacz YubiKey (2FA) i kliknij Inicjuj - utworzy zaszyfrowana baze. Potem Harvest.")
+            ? "Gotowe. Odblokuj (PIN" + (Mode.Yubi ? " + wepnij YubiKey" : "") + "), potem otwórz Skrzynki lub wyszukuj."
+            : "Korpus niezainicjowany. Wpisz PIN, zaznacz YubiKey (2FA) i kliknij Inicjuj - utworzy zaszyfrowaną bazę.")
             + Environment.NewLine + "Katalog danych: " + Paths.Base + Environment.NewLine;
     }
 
@@ -169,7 +157,7 @@ sealed class MainForm : Form
         bool dbExists = File.Exists(Paths.CorpusDb);
         bool force = Setup.IsInitialized || dbExists;
         if (dbExists && MessageBox.Show(this,
-            "Korpus juz istnieje. Ponowna inicjacja SKASUJE dotychczasowe dane (trzeba bedzie ponownie zharvestowac). Kontynuowac?",
+            "Korpus już istnieje. Ponowna inicjacja SKASUJE dotychczasowe dane (trzeba będzie ponownie zaimportować skrzynki). Kontynuować?",
             "Uwaga", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
 
         SetBusy(true, wantYubi ? "licze YubiKey / tworze baze..." : "tworze baze...");
@@ -181,7 +169,7 @@ sealed class MainForm : Form
             int ttl = TtlHours();
             RamSession.Set(r.KeyHex!, TimeSpan.FromHours(ttl)); // klucz w RAM (nie na dysku)
             Session.Lock(); // upewnij sie ze nic nie zostaje na dysku
-            Log($"Zainicjowano zaszyfrowany korpus [{(wantYubi ? "PIN + YubiKey" : "PIN")}], klucz w RAM na {ttl}h. Teraz kliknij Harvest.");
+            Log($"Zainicjowano zaszyfrowany korpus [{(wantYubi ? "PIN + YubiKey" : "PIN")}], klucz w RAM na {ttl}h. Otwórz ekran Skrzynki.");
         }
         finally { SetBusy(false); RefreshMeta(); RefreshStatus(); }
     }
@@ -201,12 +189,6 @@ sealed class MainForm : Form
     int _pollN;
     void OnTick()
     {
-        if (_activeHarvest is { IsCancellationRequested: false } active && !RamSession.Unlocked)
-        {
-            active.Cancel();
-            _lock.Enabled = false;
-            Log("Sesja wygasła lub została zablokowana — anuluję aktywny harvest.");
-        }
         RefreshStatus();
         // co ~5s: jesli tryb pin+yubi i odblokowane, sprawdz czy klucz nadal wpiety -> auto-lock po wyjeciu
         if (RamSession.Unlocked && Mode.Yubi && (++_pollN % 5 == 0) && !YubiKey.TryInfo(out _))
@@ -217,7 +199,6 @@ sealed class MainForm : Form
 
     void LockSession(string message)
     {
-        _activeHarvest?.Cancel();
         RamSession.Clear();
         Session.Lock();
         _pin.Clear();
@@ -254,7 +235,6 @@ sealed class MainForm : Form
             HideToTray();
             return;
         }
-        _activeHarvest?.Cancel();
         RamSession.Clear(); // zeroizacja best-effort przy realnym wyjsciu
         _agent.Dispose();   // zatrzymaj serwer pipe
         _tray.Visible = false;
@@ -351,19 +331,6 @@ sealed class MainForm : Form
 
     int TtlHours() => _ttl.SelectedItem?.ToString() switch { "12h" => 12, "24h" => 24, _ => 5 };
 
-    DateTime? LastHarvestSince(string key)
-    {
-        try
-        {
-            using var c = Db.Open(key, create: false);
-            var lh = Corpus.LastHarvest(c);
-            if (lh != null && DateTime.TryParseExact(lh, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d))
-                return d;
-        }
-        catch { }
-        return null; // brak -> pelny pull
-    }
-
     string[] BuildQueryArgs()
     {
         // fraza za separatorem '--': tekst zaczynajacy sie od '--' nie zostanie potraktowany jak flaga
@@ -446,10 +413,10 @@ sealed class MainForm : Form
         return $"{seconds / 3600:00}:{seconds / 60 % 60:00}:{seconds % 60:00}";
     }
 
-    void OpenGmail()
+    void OpenMailboxes()
     {
         if (RamSession.Key is null) { Log("Najpierw odblokuj."); return; }
-        using var form = new GmailManagerForm(() => RamSession.Key);
+        using var form = new MailboxManagerForm(() => RamSession.Key);
         form.ShowDialog(this);
     }
 
@@ -498,85 +465,6 @@ sealed class MainForm : Form
         finally { SetBusy(false); RefreshStatus(); }
     }
 
-    async Task DoHarvest()
-    {
-        if (_busy) return;
-        string? key = RamSession.Key;
-        if (key is null) { Log("Najpierw odblokuj."); return; }
-        string zakres = (string)_range.SelectedItem!;
-        DateTime? since = zakres switch
-        {
-            "Dzis" => DateTime.Today,
-            "3 dni" => DateTime.Today.AddDays(-3),
-            "7 dni" => DateTime.Today.AddDays(-7),
-            "30 dni" => DateTime.Today.AddDays(-30),
-            "Ten rok" => new DateTime(DateTime.Today.Year, 1, 1),
-            "Od ostatniego" => LastHarvestSince(key),
-            _ => (DateTime?)null, // Wszystko
-        };
-        if (zakres == "Od ostatniego" && since is null) Log("Brak poprzedniego harvestu - pelny pull.");
-        var cfg = AppConfig.Load(); // store/limit z config.json (nie zaszyte); ta sama sciezka co CLI
-        string storeDisp = cfg.StoreFilter.Length == 0 ? "wszystkie skrzynki" : $"store~{cfg.StoreFilter}";
-        Log($"Harvest [{zakres}] wszystkie foldery bez usunietych/draft ({storeDisp})...");
-        SetBusy(true, $"harvest [{zakres}]...");
-        _lock.Enabled = true;
-        _prog.Value = 0; _prog.Visible = true;
-        using var cancellation = new CancellationTokenSource();
-        _activeHarvest = cancellation;
-        try
-        {
-            string msg = await Task.Run(() =>
-            {
-                cancellation.Token.ThrowIfCancellationRequested();
-                Action<int, int> prog = (done, total) => { try { BeginInvoke(() => UpdateProgress(zakres, done, total)); } catch { } };
-                string stamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-                using var c = Db.Open(key, create: false); // init gwarantuje istnienie bazy; nie tworzymy po cichu
-                Db.EnsureSchema(c);
-                int ins = 0, upd = 0;
-                using (var ol = new Outlook())
-                    ol.HarvestMail(cfg.StoreFilter, since, cfg.EffectiveMax, _ => { }, prog,
-                        batch =>
-                        {
-                            cancellation.Token.ThrowIfCancellationRequested();
-                            var st = Corpus.Upsert(c, batch, stamp, cancellation.Token);
-                            ins += st.Inserted;
-                            upd += st.Updated;
-                        }, cancellationToken: cancellation.Token); // zapis porcjami
-                return $"Harvest: +{ins} nowych, {upd} zaktualizowanych. Korpus: {Corpus.Count(c)} maili.";
-            }, cancellation.Token);
-            Log(msg);
-        }
-        catch (OperationCanceledException)
-        {
-            Log("Harvest anulowany po zablokowaniu sesji; wcześniej zapisane porcje pozostają w korpusie.");
-        }
-        catch (Exception ex) { Log("Blad harvest: " + ex.Message); }
-        finally
-        {
-            if (ReferenceEquals(_activeHarvest, cancellation)) _activeHarvest = null;
-            _prog.Visible = false;
-            SetBusy(false);
-            RefreshStatus();
-        }
-    }
-
-    void UpdateProgress(string zakres, int done, int total)
-    {
-        if (total > 0)
-        {
-            int pct = Math.Min(100, done * 100 / total);
-            _prog.Style = ProgressBarStyle.Continuous;
-            _prog.Maximum = total;
-            _prog.Value = Math.Min(done, total);
-            _status.Text = $"harvest [{zakres}]... {pct}% ({done}/{total})";
-        }
-        else
-        {
-            _prog.Style = ProgressBarStyle.Marquee; // nieznana liczba -> pasek "chodzacy"
-            _status.Text = $"harvest [{zakres}]... {done}";
-        }
-    }
-
     // Console.Out/Error sa globalne dla procesu: dwa rownolegle przechwycenia przeplotlyby save/restore
     // i zostawily Console.Out na martwym StringWriterze - stad serializacja calego bloku podmiany.
     static readonly object ConsoleCaptureLock = new();
@@ -585,7 +473,7 @@ sealed class MainForm : Form
     {
         if (_busy) return;
         if (RamSession.Key is null) { Log("Najpierw odblokuj."); return; }
-        if (!File.Exists(Paths.CorpusDb)) { Log("Korpus pusty - najpierw Harvest."); return; }
+        if (!File.Exists(Paths.CorpusDb)) { Log("Korpus pusty - najpierw dodaj skrzynkę i uruchom import."); return; }
         SetBusy(true, busy);
         try
         {
@@ -609,8 +497,8 @@ sealed class MainForm : Form
     void SetBusy(bool busy, string? msg = null)
     {
         _busy = busy;
-        _init.Enabled = _unlock.Enabled = _lock.Enabled = _searchBtn.Enabled = _statsBtn.Enabled = _harvestBtn.Enabled
-            = _range.Enabled = _ttl.Enabled = _rulesBtn.Enabled = _gmailBtn.Enabled = _searchKind.Enabled = !busy;
+        _init.Enabled = _unlock.Enabled = _lock.Enabled = _searchBtn.Enabled = _statsBtn.Enabled
+            = _ttl.Enabled = _rulesBtn.Enabled = _mailboxesBtn.Enabled = _searchKind.Enabled = !busy;
         _pin.Enabled = _search.Enabled = !busy; // Enter w tych polach startuje operacje - tez musza byc zablokowane
         UseWaitCursor = busy;
         if (busy && msg != null) _status.Text = msg;
@@ -658,8 +546,8 @@ sealed class MainForm : Form
             En(_unlock, init && !unlocked);
             En(_lock, unlocked);
             En(_ttl, !unlocked);
-            En(_searchBtn, unlocked); En(_statsBtn, unlocked); En(_harvestBtn, unlocked); En(_range, unlocked);
-            En(_gmailBtn, unlocked); En(_searchKind, unlocked);
+            En(_searchBtn, unlocked); En(_statsBtn, unlocked);
+            En(_mailboxesBtn, unlocked); En(_searchKind, unlocked);
         }
 
         _tray.Text = unlocked
