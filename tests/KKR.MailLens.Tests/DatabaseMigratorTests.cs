@@ -21,6 +21,8 @@ public sealed class DatabaseMigratorTests
         Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='content_segments';"));
         Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='content_fts';"));
         Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='mailbox_sources';"));
+        Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='mailbox_import_runs';"));
+        Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='mailbox_import_run_sources';"));
         Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM pragma_table_info('mails') WHERE name='mailbox_source_id';"));
         Assert.AreEqual(1, db.ScalarLong("PRAGMA foreign_keys;"));
         Assert.AreEqual(5000, db.ScalarLong("PRAGMA busy_timeout;"));
@@ -132,7 +134,7 @@ public sealed class DatabaseMigratorTests
 
                 Db.EnsureSchema(connection);
 
-                Assert.AreEqual("13", ScalarText(connection,
+                Assert.AreEqual(Db.SchemaVersion.ToString(), ScalarText(connection,
                     "SELECT v FROM meta WHERE k='schema_version';"));
                 Assert.AreEqual("sender@example.invalid", ScalarText(connection,
                     "SELECT external_key FROM mailbox_sources;"));
