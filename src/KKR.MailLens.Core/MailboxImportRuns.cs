@@ -349,7 +349,8 @@ static class MailboxImportRunRepository
     {
         using var transaction = connection.BeginTransaction();
         MailboxImportRunRecord? run = FindRun(connection, transaction, runId);
-        if (run is null || run.Status != MailboxImportRunStatus.Importing)
+        if (run is null || run.Status is not (
+            MailboxImportRunStatus.Queued or MailboxImportRunStatus.Importing))
             return null;
 
         string now = Now();
@@ -370,6 +371,8 @@ static class MailboxImportRunRepository
             transaction.Commit();
             return MailboxImportRunStatus.Cancelled;
         }
+        if (run.Status != MailboxImportRunStatus.Importing)
+            return null;
 
         using (var unfinished = Command(connection, transaction, """
             SELECT count(*) FROM mailbox_import_run_sources
@@ -402,7 +405,8 @@ static class MailboxImportRunRepository
         long failures;
         using (var count = Command(connection, transaction, """
             SELECT count(*) FROM mailbox_import_run_sources
-            WHERE run_id=$run AND status IN ('failed','cancelled');
+            WHERE run_id=$run
+              AND (status IN ('failed','cancelled') OR errors > 0);
             """, ("$run", runId)))
             failures = Convert.ToInt64(count.ExecuteScalar());
 
