@@ -20,6 +20,8 @@ public sealed class DatabaseMigratorTests
         Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='content_documents';"));
         Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='content_segments';"));
         Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='content_fts';"));
+        Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='mailbox_sources';"));
+        Assert.AreEqual(1, db.ScalarLong("SELECT count(*) FROM pragma_table_info('mails') WHERE name='mailbox_source_id';"));
         Assert.AreEqual(1, db.ScalarLong("PRAGMA foreign_keys;"));
         Assert.AreEqual(5000, db.ScalarLong("PRAGMA busy_timeout;"));
     }
@@ -83,6 +85,61 @@ public sealed class DatabaseMigratorTests
                     "SELECT count(*) FROM pragma_table_info('attachments') WHERE name IN ('part_id','is_deleted','last_seen_generation');"));
                 Assert.AreEqual(1, ScalarLong(connection,
                     "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='mail_attachments';"));
+            }
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            try { Directory.Delete(directory, recursive: true); } catch { }
+        }
+    }
+
+    [TestMethod]
+    public void VersionThirteenMigration_RegistersExistingGmailAccountAndMessages()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "kkr-maillens-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        string path = Path.Combine(directory, "legacy.db");
+        try
+        {
+            using (SqliteConnection connection = Db.Open(new string('C', 64), create: true, path: path))
+            {
+                using (var legacy = connection.CreateCommand())
+                {
+                    legacy.CommandText = """
+                        CREATE TABLE meta(k TEXT PRIMARY KEY, v TEXT);
+                        INSERT INTO meta(k,v) VALUES('schema_version','12');
+                        CREATE TABLE accounts(
+                            id INTEGER PRIMARY KEY,
+                            email TEXT NOT NULL,
+                            provider TEXT NOT NULL,
+                            display_name TEXT NOT NULL,
+                            token_key TEXT NOT NULL,
+                            created_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL
+                        );
+                        CREATE TABLE mails(entry_id TEXT PRIMARY KEY,store_id TEXT);
+                        INSERT INTO accounts(
+                            id,email,provider,display_name,token_key,created_at,updated_at)
+                        VALUES(
+                            7,'Sender@Example.Invalid','gmail','Test mailbox','token-ref',
+                            '2026-01-01T00:00:00Z','2026-01-02T00:00:00Z');
+                        INSERT INTO mails(entry_id,store_id)
+                        VALUES('gmail:7:message-1','gmail:7');
+                        """;
+                    legacy.ExecuteNonQuery();
+                }
+
+                Db.EnsureSchema(connection);
+
+                Assert.AreEqual("13", ScalarText(connection,
+                    "SELECT v FROM meta WHERE k='schema_version';"));
+                Assert.AreEqual("sender@example.invalid", ScalarText(connection,
+                    "SELECT external_key FROM mailbox_sources;"));
+                Assert.AreEqual("gmail-account:7", ScalarText(connection,
+                    "SELECT credential_ref FROM mailbox_sources;"));
+                Assert.AreEqual(1, ScalarLong(connection,
+                    "SELECT count(*) FROM mails WHERE mailbox_source_id IS NOT NULL;"));
             }
         }
         finally
