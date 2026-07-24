@@ -17,22 +17,47 @@ namespace KKR.MailLens;
 static class Imap
 {
     public static int Harvest(ImapAccount acct, string sessionKeyHex, DateTime? from, int maxPerFolder,
-        Action<string> onFolder, Action<int, int>? onProgress, Action<List<HarvestedMail>> flush, int batchSize = 500)
+        Action<string> onFolder, Action<int, int>? onProgress, Action<List<HarvestedMail>> flush,
+        int batchSize = 500, CancellationToken cancellationToken = default)
+        => HarvestDetailed(acct, sessionKeyHex, from, maxPerFolder, onFolder, onProgress, flush,
+            batchSize, cancellationToken).Processed;
+
+    public static ImapHarvestResult HarvestDetailed(
+        ImapAccount acct,
+        string sessionKeyHex,
+        DateTime? from,
+        int maxPerFolder,
+        Action<string> onFolder,
+        Action<int, int>? onProgress,
+        Action<List<HarvestedMail>> flush,
+        int batchSize = 500,
+        CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(acct);
+        if (maxPerFolder < 0)
+            throw new ArgumentOutOfRangeException(nameof(maxPerFolder));
+        if (batchSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(batchSize));
+        cancellationToken.ThrowIfCancellationRequested();
+        int folderLimit = maxPerFolder == 0 ? int.MaxValue : maxPerFolder;
         using var client = new ImapClient();
         client.Connect(acct.Host, acct.Port, acct.UseSsl ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTls);
+        cancellationToken.ThrowIfCancellationRequested();
         client.Authenticate(acct.User, acct.GetPassword(sessionKeyHex));
+        cancellationToken.ThrowIfCancellationRequested();
 
         // foldery-cele (Inbox + reszta z personal namespace), pomijajac systemowe/dublujace
         List<IMailFolder> targets = TargetFolders(client);
 
         // total (dla %) - otwarcie readonly daje Count
         int total = 0;
+        int errors = 0;
         var counts = new Dictionary<string, int>();
         foreach (var f in targets)
         {
-            try { f.Open(FolderAccess.ReadOnly); int cnt = Math.Min(f.Count, maxPerFolder); counts[f.FullName] = cnt; total += cnt; }
-            catch { counts[f.FullName] = 0; }
+            cancellationToken.ThrowIfCancellationRequested();
+            try { f.Open(FolderAccess.ReadOnly); int cnt = Math.Min(f.Count, folderLimit); counts[f.FullName] = cnt; total += cnt; }
+            catch { counts[f.FullName] = 0; errors++; }
         }
 
         var acc = new List<HarvestedMail>();
@@ -41,6 +66,7 @@ static class Imap
 
         foreach (var f in targets)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             onFolder($"{acct.Name} / {f.FullName}");
             IList<UniqueId> uids;
             try
@@ -48,21 +74,22 @@ static class Imap
                 if (!f.IsOpen) f.Open(FolderAccess.ReadOnly); // count juz otworzyl wiekszosc; nie otwieramy dwa razy
                 uids = from is { } d ? f.Search(SearchQuery.DeliveredAfter(d)) : f.Search(SearchQuery.All);
             }
-            catch { continue; }
+            catch { errors++; continue; }
 
             // najnowsze najpierw, cap na folder
             var ordered = new List<UniqueId>(uids);
             ordered.Sort((a, b) => b.Id.CompareTo(a.Id));
-            if (ordered.Count > maxPerFolder) ordered = ordered.GetRange(0, maxPerFolder);
+            if (ordered.Count > folderLimit) ordered = ordered.GetRange(0, folderLimit);
             if (ordered.Count == 0) continue;
 
             // Metadane wsadowo (koperta + struktura), BEZ pobierania bajtow zalacznikow.
             IList<IMessageSummary> summaries;
             try { summaries = f.Fetch(ordered, MessageSummaryItems.Envelope | MessageSummaryItems.BodyStructure | MessageSummaryItems.UniqueId | MessageSummaryItems.Size | MessageSummaryItems.InternalDate); }
-            catch { continue; }
+            catch { errors++; continue; }
 
             foreach (var s in summaries)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 done++;
                 if (onProgress != null && done % 100 == 0) onProgress(done, total);
 
@@ -74,17 +101,23 @@ static class Imap
                     if (part != null && f.GetBodyPart(s.UniqueId, part) is TextPart tp)
                         body = part == s.HtmlBody ? StripHtml(tp.Text) : tp.Text;
                 }
-                catch { }
+                catch { errors++; }
 
                 acc.Add(MapSummary(s, acct.Name, f, body, storeId));
                 totalMails++;
-                if (acc.Count >= batchSize) { flush(acc); acc.Clear(); }
+                if (acc.Count >= batchSize)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    flush(acc);
+                    acc.Clear();
+                }
             }
         }
+        cancellationToken.ThrowIfCancellationRequested();
         if (acc.Count > 0) flush(acc);
         if (onProgress != null) onProgress(done, total);
         try { client.Disconnect(true); } catch { }
-        return totalMails;
+        return new ImapHarvestResult(totalMails, errors);
     }
 
     /// <summary>Foldery pocztowe konta (Inbox + personal namespace) po odfiltrowaniu systemowych;
@@ -207,6 +240,8 @@ static class Imap
         return Regex.Replace(t, "\\s+", " ").Trim();
     }
 }
+
+sealed record ImapHarvestResult(int Processed, int Errors);
 
 sealed record ImapMessageLocator(string AccountName, string FolderFullName, uint UidValidity, uint Uid)
 {

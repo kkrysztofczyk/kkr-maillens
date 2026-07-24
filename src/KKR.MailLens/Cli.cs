@@ -233,6 +233,12 @@ static class Cli
         accts.Accounts.RemoveAll(x => string.Equals(x.Name, a.Name, StringComparison.OrdinalIgnoreCase));
         accts.Accounts.Add(a);
         accts.Save();
+        if (File.Exists(Paths.CorpusDb))
+        {
+            using var database = Db.Open(key, create: false);
+            Db.EnsureSchema(database);
+            ImapMailboxRegistration.Register(database, a);
+        }
         Console.WriteLine($"Zapisano konto IMAP '{a.Name}' ({a.User}@{a.Host}:{a.Port}, ssl={a.UseSsl}). Hasło chronione aktywną sesją i DPAPI.");
         return 0;
     }
@@ -276,10 +282,16 @@ static class Cli
             Console.WriteLine($"IMAP '{a.Name}' ({a.User}@{a.Host}): since={(since?.ToString("yyyy-MM-dd") ?? "(brak)")}, max/folder={max}");
             try
             {
+                MailboxSourceRecord source = ImapMailboxRegistration.Register(c, a, max, since);
                 int n = Imap.Harvest(a, key, since, max,
                     f => Console.WriteLine($"  folder: {f}"),
                     (done, total) => Console.WriteLine($"    ...{(total > 0 ? done * 100 / total : 0)}% ({done}/{total})"),
-                    batch => { var st = Corpus.Upsert(c, batch, stamp); ins += st.Inserted; upd += st.Updated; });
+                    batch =>
+                    {
+                        var st = Corpus.Upsert(c, batch, stamp, mailboxSourceId: source.Id);
+                        ins += st.Inserted;
+                        upd += st.Updated;
+                    });
                 Console.WriteLine($"  zebrano {n} z '{a.Name}'.");
             }
             catch (Exception ex) { Console.Error.WriteLine($"  Blad IMAP '{a.Name}': {ex.Message} (zapisane porcje zostaly)"); }
