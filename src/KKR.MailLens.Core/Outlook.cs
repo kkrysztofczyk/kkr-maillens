@@ -23,6 +23,47 @@ sealed class HarvestedMail
 sealed record HarvestedAttachment(string ProviderAttachmentKey, string PartId, string Filename,
     string MimeType, long SizeBytes, string ContentId, bool IsInline);
 
+enum OutlookStoreKind
+{
+    Mailbox,
+    Pst,
+    Ost,
+    DataFile,
+}
+
+sealed class OutlookStoreInfo
+{
+    public OutlookStoreInfo(string storeId, string displayName, string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(storeId))
+            throw new ArgumentException("Magazyn Outlook nie ma identyfikatora.", nameof(storeId));
+        StoreId = storeId.Trim();
+        DisplayName = string.IsNullOrWhiteSpace(displayName) ? "Outlook" : displayName.Trim();
+        FilePath = string.IsNullOrWhiteSpace(filePath) ? null : filePath.Trim();
+        Kind = Classify(FilePath);
+    }
+
+    public string StoreId { get; }
+    public string DisplayName { get; }
+    public string? FilePath { get; }
+    public OutlookStoreKind Kind { get; }
+    public bool IsPst => Kind == OutlookStoreKind.Pst;
+
+    public override string ToString() => $"{DisplayName} ({Kind})";
+
+    static OutlookStoreKind Classify(string? filePath)
+    {
+        string extension = Path.GetExtension(filePath ?? "");
+        if (extension.Equals(".pst", StringComparison.OrdinalIgnoreCase))
+            return OutlookStoreKind.Pst;
+        if (extension.Equals(".ost", StringComparison.OrdinalIgnoreCase))
+            return OutlookStoreKind.Ost;
+        return string.IsNullOrWhiteSpace(filePath)
+            ? OutlookStoreKind.Mailbox
+            : OutlookStoreKind.DataFile;
+    }
+}
+
 /// <summary>
 /// Wlasciciel polaczenia COM z Outlookiem na dedykowanym watku STA (Outlook Object Model jest
 /// apartment-affine). Integracja wykonuje wyłącznie operacje odczytu.
@@ -133,6 +174,48 @@ sealed class Outlook : IDisposable
         });
     }
 
+    public IReadOnlyList<OutlookStoreInfo> ListStores(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Invoke(ns =>
+        {
+            var result = new List<OutlookStoreInfo>();
+            dynamic? stores = null;
+            try
+            {
+                stores = ns.Stores;
+                int count = (int)stores.Count;
+                for (int index = 1; index <= count; index++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    dynamic? store = null;
+                    try
+                    {
+                        store = stores[index];
+                        string storeId = Str(() => (string)store!.StoreID);
+                        if (string.IsNullOrWhiteSpace(storeId))
+                            continue;
+                        result.Add(new OutlookStoreInfo(
+                            storeId,
+                            Str(() => (string)store!.DisplayName),
+                            Str(() => (string)store!.FilePath)));
+                    }
+                    finally
+                    {
+                        if (store is object value)
+                            Release(value);
+                    }
+                }
+                return (IReadOnlyList<OutlookStoreInfo>)result;
+            }
+            finally
+            {
+                if (stores is object value)
+                    Release(value);
+            }
+        });
+    }
+
     // ---- zbieranie ----
 
     /// <summary>Zbiera maile ze WSZYSTKICH folderow pocztowych skrzynek pasujacych do storeContains,
@@ -143,9 +226,14 @@ sealed class Outlook : IDisposable
     public int HarvestMail(string? storeContains, DateTime? from, int maxPerFolder,
         Action<string> onFolder, Action<int, int>? onProgress, Action<List<HarvestedMail>> flush,
         string[]? includeLeaves = null, int batchSize = 500,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, string? exactStoreId = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (maxPerFolder < 0)
+            throw new ArgumentOutOfRangeException(nameof(maxPerFolder));
+        if (batchSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(batchSize));
+        int folderLimit = maxPerFolder == 0 ? int.MaxValue : maxPerFolder;
         // includeLeaves != null => bierz TYLKO foldery o tych nazwach (reszta pominieta, np. Projekty/Archiwum)
         HashSet<string>? include = null;
         if (includeLeaves != null && includeLeaves.Length > 0)
@@ -162,6 +250,7 @@ sealed class Outlook : IDisposable
             // 1) zbierz foldery-cele ze wszystkich pasujacych skrzynek. Kazdy RCW (kolekcja Stores,
             //    store, root, zebrane foldery) zwalniamy jawnie - te obiekty zyja przez caly harvest.
             var targets = new List<(dynamic Folder, string Path, string Leaf, string Sid, string Disp)>();
+            bool matchedExactStore = string.IsNullOrWhiteSpace(exactStoreId);
             dynamic? stores = null;
             try
             {
@@ -175,8 +264,14 @@ sealed class Outlook : IDisposable
                     {
                         store = stores[i];
                         string name = Str(() => (string)store!.DisplayName);
-                        if (!string.IsNullOrWhiteSpace(storeContains) && !name.Contains(storeContains!, StringComparison.OrdinalIgnoreCase)) continue;
                         string sid = Str(() => (string)store!.StoreID);
+                        if (!string.IsNullOrWhiteSpace(exactStoreId)
+                            && !string.Equals(sid, exactStoreId, StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        matchedExactStore = true;
+                        if (!string.IsNullOrWhiteSpace(storeContains)
+                            && !name.Contains(storeContains!, StringComparison.OrdinalIgnoreCase))
+                            continue;
                         var excluded = ExcludedFolderIds(store!);
                         var fs = new List<dynamic>();
                         dynamic? root = null;
@@ -201,6 +296,8 @@ sealed class Outlook : IDisposable
                     }
                     finally { if (store is object s) Release(s); }
                 }
+                if (!matchedExactStore)
+                    throw new InvalidOperationException("Wybrany magazyn Outlook nie jest podmontowany.");
 
                 // 2) policz ile elementow planujemy przeskanowac (baza dla procentow). Zwalniamy RCW kolekcji
                 //    Items zaraz po odczycie Count - inaczej wyciek jednej kolekcji COM na kazdy folder.
@@ -209,7 +306,7 @@ sealed class Outlook : IDisposable
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     dynamic? items = null;
-                    try { items = t.Folder.Items; total += Math.Min((int)items.Count, maxPerFolder); }
+                    try { items = t.Folder.Items; total += Math.Min((int)items.Count, folderLimit); }
                     catch { }
                     finally { if (items != null) Release((object)items); }
                 }
@@ -231,7 +328,7 @@ sealed class Outlook : IDisposable
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     onFolder(t.Disp);
-                    ScanFolder(t.Folder, t.Path, t.Leaf, t.Sid, from, maxPerFolder, acc,
+                    ScanFolder(t.Folder, t.Path, t.Leaf, t.Sid, from, folderLimit, acc,
                         onScanned, onAdded, cancellationToken);
                 }
                 cancellationToken.ThrowIfCancellationRequested();

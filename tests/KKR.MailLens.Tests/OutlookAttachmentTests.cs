@@ -56,6 +56,16 @@ public sealed class OutlookAttachmentTests
     }
 
     [TestMethod]
+    public void StoreEnumeration_RejectsCancellationBeforeAccessingOutlook()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        using var outlook = new Outlook();
+
+        Assert.Throws<OperationCanceledException>(() => outlook.ListStores(cancellation.Token));
+    }
+
+    [TestMethod]
     public void CorpusUpsert_QueuesOutlookAttachment()
     {
         using var db = new TestDatabase();
