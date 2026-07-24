@@ -58,14 +58,23 @@ static class GmailOAuth
         GmailAccountRecord? existing = GmailRepository.FindAccount(database, email);
         string tokenKey = existing?.TokenKey ?? "gmail-" + Guid.NewGuid().ToString("N");
         bool stored = false;
+        GmailAccountRecord? persisted = null;
         try
         {
             await store.StoreAsync(tokenKey, token).ConfigureAwait(false);
             stored = true;
-            return GmailRepository.UpsertAccount(database, email, email, tokenKey);
+            persisted = GmailRepository.UpsertAccount(database, email, email, tokenKey);
+            MailboxSourceRepository.Upsert(database, new MailboxSourceDefinition(
+                MailboxProvider.Gmail,
+                persisted.Email,
+                persisted.DisplayName,
+                $"gmail-account:{persisted.Id}"));
+            return persisted;
         }
         catch
         {
+            if (persisted is not null && existing is null)
+                GmailRepository.DeleteAccount(database, persisted.Id);
             if (stored && existing is null)
                 await store.DeleteAsync<TokenResponse>(tokenKey).ConfigureAwait(false);
             throw;

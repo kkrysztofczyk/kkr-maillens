@@ -60,6 +60,7 @@ static class GmailRepository
         using var cmd = Command(c, null, "DELETE FROM accounts WHERE id=$id AND provider=$provider;",
             ("$id", accountId), ("$provider", Provider));
         cmd.ExecuteNonQuery();
+        MailboxSourceRepository.Delete(c, MailboxProvider.Gmail, account.Email);
         return account.TokenKey;
     }
 

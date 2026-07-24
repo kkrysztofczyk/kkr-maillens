@@ -9,6 +9,7 @@ sealed class GmailSynchronizer
     readonly IGmailApiClient _api;
     readonly IProgress<GmailSyncProgress>? _progress;
     readonly int _parallelism;
+    long? _mailboxSourceId;
 
     public GmailSynchronizer(SqliteConnection database, IGmailApiClient api,
         IProgress<GmailSyncProgress>? progress = null, int parallelism = 4)
@@ -22,6 +23,10 @@ sealed class GmailSynchronizer
     public async Task<GmailSyncResult> SyncAsync(GmailAccountRecord account, bool forceFull, CancellationToken cancellationToken)
     {
         account = GmailRepository.FindAccount(_database, account.Id) ?? throw new InvalidOperationException("Konto Gmail nie istnieje.");
+        _mailboxSourceId = MailboxSourceRepository.FindByCredentialReference(
+            _database,
+            $"gmail-account:{account.Id}")?.Id
+            ?? MailboxSourceRepository.Find(_database, MailboxProvider.Gmail, account.Email)?.Id;
         bool shouldFull = forceFull || !account.InitialSyncCompleted || string.IsNullOrWhiteSpace(account.LastHistoryId);
         GmailRepository.SetOperation(_database, account.Id, shouldFull ? "full-sync" : "incremental-sync", errors: 0);
 
@@ -212,7 +217,8 @@ sealed class GmailSynchronizer
             {
                 string stamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
                 Corpus.Upsert(_database, transaction,
-                    saved.Saved.Select(x => GmailMessageMapper.ToHarvested(x, labelNames)), stamp);
+                    saved.Saved.Select(x => GmailMessageMapper.ToHarvested(x, labelNames)), stamp,
+                    mailboxSourceId: _mailboxSourceId);
                 MailAttachmentRepository.UpsertGmail(_database, transaction, account.SyncGeneration, saved.Saved);
             }
             transaction.Commit();

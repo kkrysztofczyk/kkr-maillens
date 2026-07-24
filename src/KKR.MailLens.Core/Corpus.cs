@@ -9,17 +9,17 @@ static class Corpus
     public sealed record Stats(int Inserted, int Updated);
 
     public static Stats Upsert(SqliteConnection c, IEnumerable<HarvestedMail> mails, string harvestedAt,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, long? mailboxSourceId = null)
     {
         using var transaction = c.BeginTransaction();
-        Stats result = Upsert(c, transaction, mails, harvestedAt, cancellationToken);
+        Stats result = Upsert(c, transaction, mails, harvestedAt, cancellationToken, mailboxSourceId);
         transaction.Commit();
         return result;
     }
 
     internal static Stats Upsert(SqliteConnection c, SqliteTransaction transaction,
         IEnumerable<HarvestedMail> mails, string harvestedAt,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, long? mailboxSourceId = null)
     {
         int ins = 0, upd = 0;
 
@@ -51,14 +51,15 @@ static class Corpus
         using var up = c.CreateCommand();
         up.Transaction = transaction;
         up.CommandText = """
-            INSERT INTO mails(entry_id,source_identity,store_id,folder_path,folder_leaf,conversation_id,received,sent,
+            INSERT INTO mails(entry_id,source_identity,mailbox_source_id,store_id,folder_path,folder_leaf,conversation_id,received,sent,
                 sender_name,sender_email,to_recips,cc_recips,subject,body,has_attachments,attachment_names,
                 size,unread,categories,kind,harvested_at)
-            VALUES($entry_id,$source_identity,$store_id,$folder_path,$folder_leaf,$conversation_id,$received,$sent,
+            VALUES($entry_id,$source_identity,$mailbox_source_id,$store_id,$folder_path,$folder_leaf,$conversation_id,$received,$sent,
                 $sender_name,$sender_email,$to_recips,$cc_recips,$subject,$body,$has_attachments,$attachment_names,
                 $size,$unread,$categories,$kind,$harvested_at)
             ON CONFLICT(entry_id) DO UPDATE SET
                 source_identity=COALESCE(excluded.source_identity,mails.source_identity),
+                mailbox_source_id=COALESCE(excluded.mailbox_source_id,mails.mailbox_source_id),
                 store_id=excluded.store_id, folder_path=excluded.folder_path, folder_leaf=excluded.folder_leaf,
                 conversation_id=excluded.conversation_id, received=excluded.received, sent=excluded.sent,
                 sender_name=excluded.sender_name, sender_email=excluded.sender_email,
@@ -68,7 +69,7 @@ static class Corpus
                 categories=excluded.categories, kind=excluded.kind, harvested_at=excluded.harvested_at;
             """;
         var p = new Dictionary<string, SqliteParameter>();
-        foreach (var n in new[] { "entry_id","source_identity","store_id","folder_path","folder_leaf","conversation_id","received","sent",
+        foreach (var n in new[] { "entry_id","source_identity","mailbox_source_id","store_id","folder_path","folder_leaf","conversation_id","received","sent",
             "sender_name","sender_email","to_recips","cc_recips","subject","body","has_attachments","attachment_names",
             "size","unread","categories","kind","harvested_at" })
         { var pp = up.CreateParameter(); pp.ParameterName = "$" + n; up.Parameters.Add(pp); p[n] = pp; }
@@ -131,6 +132,7 @@ static class Corpus
             p["entry_id"].Value = storageEntryId;
             p["source_identity"].Value = string.IsNullOrWhiteSpace(m.SourceIdentity)
                 ? DBNull.Value : m.SourceIdentity;
+            p["mailbox_source_id"].Value = (object?)mailboxSourceId ?? DBNull.Value;
             p["store_id"].Value = m.StoreId;
             p["folder_path"].Value = m.FolderPath;
             p["folder_leaf"].Value = m.FolderLeaf;

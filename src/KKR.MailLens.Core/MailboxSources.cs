@@ -120,6 +120,25 @@ static class MailboxSourceRepository
         return reader.Read() ? Read(reader) : null;
     }
 
+    public static MailboxSourceRecord? FindByCredentialReference(
+        SqliteConnection connection,
+        string credentialReference)
+    {
+        if (string.IsNullOrWhiteSpace(credentialReference))
+            return null;
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id,provider,external_key,display_name,credential_ref,settings_json,
+                   enabled,sort_order,created_at,updated_at
+            FROM mailbox_sources
+            WHERE credential_ref=$credentialRef
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$credentialRef", credentialReference.Trim());
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? Read(reader) : null;
+    }
+
     public static bool SetEnabled(SqliteConnection connection, long id, bool enabled)
     {
         using var command = connection.CreateCommand();
@@ -157,6 +176,15 @@ static class MailboxSourceRepository
         command.CommandText = "DELETE FROM mailbox_sources WHERE id=$id;";
         command.Parameters.AddWithValue("$id", id);
         return command.ExecuteNonQuery() == 1;
+    }
+
+    public static bool Delete(
+        SqliteConnection connection,
+        MailboxProvider provider,
+        string externalKey)
+    {
+        MailboxSourceRecord? source = Find(connection, provider, externalKey);
+        return source is not null && Delete(connection, source.Id);
     }
 
     static MailboxSourceRecord Read(SqliteDataReader reader) => new(
