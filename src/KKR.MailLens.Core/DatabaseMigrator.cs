@@ -22,9 +22,10 @@ static class DatabaseMigrator
         new Migration013MailboxSources(),
         new Migration014MailboxImportRuns(),
         new Migration015ProcessingRunBaseline(),
+        new Migration016MailboxImportMode(),
     ];
 
-    public const int LatestVersion = 15;
+    public const int LatestVersion = 16;
 
     public static void Migrate(SqliteConnection connection)
     {

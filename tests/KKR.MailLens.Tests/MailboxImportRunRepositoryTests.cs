@@ -13,7 +13,7 @@ public sealed class MailboxImportRunRepositoryTests
         MailboxSourceRecord second = Source(db, MailboxProvider.Gmail, "sender@example.invalid", "Mailbox B");
 
         MailboxImportRunRecord run = MailboxImportRunRepository.Create(
-            db.Connection, [second.Id, first.Id]);
+            db.Connection, [second.Id, first.Id], forceFull: true);
         MailboxSourceRepository.Upsert(db.Connection, new(
             MailboxProvider.Gmail,
             "sender@example.invalid",
@@ -25,6 +25,10 @@ public sealed class MailboxImportRunRepositoryTests
             MailboxImportRunRepository.ListSources(db.Connection, run.Id);
 
         Assert.AreEqual(MailboxImportRunStatus.Queued, run.Status);
+        Assert.IsTrue(run.ForceFull);
+        Assert.IsTrue(MailboxImportRunRepository.Find(
+            db.Connection,
+            run.Id)!.ForceFull);
         CollectionAssert.AreEqual(
             new[] { second.Id, first.Id },
             queued.Select(item => item.MailboxSourceId!.Value).ToArray());

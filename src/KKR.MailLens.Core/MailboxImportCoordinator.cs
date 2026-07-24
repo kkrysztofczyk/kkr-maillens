@@ -38,7 +38,7 @@ sealed class MailboxImportCoordinator : IDisposable
     public async Task<MailboxImportRunRecord> RunAsync(
         string sessionKeyHex,
         long runId,
-        bool forceFull,
+        bool? forceFull = null,
         IProgress<MailboxImportCoordinatorUpdate>? progress = null,
         CancellationToken cancellationToken = default)
     {
@@ -58,6 +58,7 @@ sealed class MailboxImportCoordinator : IDisposable
             Db.EnsureSchema(database);
             MailboxImportRunRecord run = MailboxImportRunRepository.Find(database, runId)
                 ?? throw new KeyNotFoundException($"Nie istnieje kolejka importu {runId}.");
+            bool effectiveForceFull = forceFull ?? run.ForceFull;
 
             if (run.Status == MailboxImportRunStatus.Importing)
             {
@@ -140,7 +141,7 @@ sealed class MailboxImportCoordinator : IDisposable
                             database,
                             sessionKeyHex,
                             source,
-                            forceFull,
+                            effectiveForceFull,
                             sourceProgress),
                         linkedCancellation.Token).ConfigureAwait(false);
                     MailboxImportProgress completed = new(

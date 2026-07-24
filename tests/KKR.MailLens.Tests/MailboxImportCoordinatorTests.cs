@@ -9,6 +9,38 @@ public sealed class MailboxImportCoordinatorTests
         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
     [TestMethod]
+    public async Task Run_UsesFullModePersistedWithQueue()
+    {
+        using var db = new TestDatabase();
+        MailboxSourceRecord source = Source(
+            db,
+            MailboxProvider.Gmail,
+            "one@example.invalid");
+        MailboxImportRunRecord run = MailboxImportRunRepository.Create(
+            db.Connection,
+            [source.Id],
+            forceFull: true);
+        bool? observed = null;
+        using var coordinator = Coordinator(
+            db,
+            new FakeImporter(
+                MailboxProvider.Gmail,
+                (request, _) =>
+                {
+                    observed = request.ForceFull;
+                    return Task.FromResult(
+                        new MailboxImportResult(0, 0, 0, 0, 0, true));
+                }));
+
+        MailboxImportRunRecord result = await coordinator.RunAsync(
+            SessionKey,
+            run.Id);
+
+        Assert.IsTrue(observed);
+        Assert.AreEqual(MailboxImportRunStatus.Processing, result.Status);
+    }
+
+    [TestMethod]
     public async Task Run_ImportsFourSourcesStrictlySequentially()
     {
         using var db = new TestDatabase();

@@ -34,7 +34,7 @@ sealed class MailboxPipelineCoordinator : IDisposable
     public async Task<MailboxPipelineResult> RunAsync(
         string sessionKeyHex,
         long runId,
-        bool forceFull,
+        bool? forceFull = null,
         IProgress<MailboxPipelineUpdate>? progress = null,
         CancellationToken cancellationToken = default)
     {
